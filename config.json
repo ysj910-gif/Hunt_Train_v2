@@ -1,0 +1,105 @@
+{
+    "last_job": "Kinesis",
+    "map_offset_x": -8,
+    "map_offset_y": -28,
+    "minimap_roi": [
+        9,
+        69,
+        180,
+        84
+    ],
+    "kill_roi": [
+        211,
+        282,
+        52,
+        20
+    ],
+    "skill_rois": {
+        "fountain": {
+            "rect": [
+                1052,
+                689,
+                30,
+                30
+            ],
+            "threshold": 162.78577777777778
+        },
+        "janus": {
+            "rect": [
+                1089,
+                688,
+                28,
+                31
+            ],
+            "threshold": 107.97419354838709
+        }
+    },
+    "job_settings": {
+        "Kinesis": {
+            "skills": [
+                {
+                    "name": "Bullet",
+                    "key": "r",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "Smashing",
+                    "key": "t",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "Rush",
+                    "key": "w",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "jump",
+                    "key": "e",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "Opening",
+                    "key": "s",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "Gambit",
+                    "key": "d",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "Checkmate",
+                    "key": "f",
+                    "cd": "0",
+                    "dur": "0"
+                },
+                {
+                    "name": "Ultimate",
+                    "key": "6",
+                    "cd": "120",
+                    "dur": "0"
+                }
+            ],
+            "installs": [
+                {
+                    "name": "fountain",
+                    "key": "4",
+                    "range": "20,8,1818",
+                    "dur": "60"
+                },
+                {
+                    "name": "janus",
+                    "key": "5",
+                    "range": "26,9,17,17",
+                    "dur": "60"
+                }
+            ]
+        }
+    }
+}
