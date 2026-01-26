@@ -10,6 +10,7 @@ import serial
 from utils.logger import logger
 from utils.physics_utils import PhysicsUtils, MovementTracker
 from utils.logger import logger, trace_logic
+from utils.human_input import HumanInput 
 
 # --- Low Level Input Definition (Windows API) ---
 SendInput = ctypes.windll.user32.SendInput
@@ -164,11 +165,18 @@ class ActionHandler:
             self._send_key_hardware(key_name, False)
 
     def press(self, key_name: str, duration: float = 0.05):
-        """단발성 키 입력"""
+        """단발성 키 입력 (HumanInput 적용)"""
         self.key_down(key_name)
-        time.sleep(duration)
+        
+        # [수정] 단순 sleep 대신 human_sleep 사용
+        # duration은 '평균적으로 누르고 싶은 시간'이 됩니다.
+        HumanInput.human_sleep(duration)
+        
         self.key_up(key_name)
-        time.sleep(0.02)
+        
+        # [수정] 키를 뗀 후 다음 행동까지의 미세한 딜레이 (After-cast delay)
+        # 0.02초 ~ 0.05초 사이의 Ex-Gaussian 딜레이
+        HumanInput.human_sleep(0.03)
 
     # --- Physics & Feedback Control Logic (기존 유지) ---
 
@@ -187,7 +195,8 @@ class ActionHandler:
 
         return required_time * 1.1
 
-    def move_x(self, target_x: int, get_current_pos: Callable[[], Tuple[int, int]], tolerance: int = 10) -> bool:
+    @trace_logic
+    def move_x(self, target_x: int, get_current_pos: Callable[[], Tuple[int, int]], tolerance: int = 10) -> bool:       
         self._stop_event.clear()
         current_pos = get_current_pos()
         if not current_pos: return False
@@ -221,20 +230,20 @@ class ActionHandler:
                     return True
                 
                 # Stuck Check
-                if self.tracker.check_stuck(time.time(), threshold_dist=5, timeout=0.5):
+                if self.tracker.check_stuck(time.time(), threshold_dist=5, timeout=3.0):
                     logger.warning(f"Stuck detected at {curr_x}")
                     self.key_up(direction)
                     return self._recover_from_stuck(get_current_pos)
 
-                time.sleep(0.01)
+                HumanInput.human_sleep(0.05)
 
             return False
         finally:
             self.key_up(direction)
-            # 관성 제어 (소프트웨어 모드에서만 유의미할 수 있음)
             if self.mode == "SOFTWARE" and self.max_walk_speed > 100: 
                 opp_key = 'left' if direction == 'right' else 'right'
-                self.press(opp_key, 0.03)
+                # 관성 제어용 반대키 입력도 랜덤화 적용
+                self.press(opp_key, 0.05)
 
     def _recover_from_stuck(self, get_current_pos: Callable) -> bool:
         self.press('jump')
@@ -247,15 +256,16 @@ class ActionHandler:
 
     @trace_logic
     def jump_shot(self, direction: Optional[str] = None, jump_key: str = 'jump', attack_key: str = 'attack'):
-        """
-        [수정] 점프 및 공격 키를 인자로 받아 유연하게 처리
-        """
         if direction: self.key_down(direction)
-        self.press(jump_key, 0.1)
-        time.sleep(0.05)
+        
+        # [수정] 점프와 공격 사이의 간격 랜덤화
+        self.press(jump_key, 0.1) 
+        HumanInput.human_sleep(0.08) # 0.05 -> 0.08 (약간 늘리면서 랜덤화)
+        
         self.press(attack_key, 0.1)
+        
         if direction:
-            time.sleep(0.1)
+            HumanInput.human_sleep(0.1)
             self.key_up(direction)
 
     def emergency_stop(self):
