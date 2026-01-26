@@ -7,13 +7,19 @@ import datetime
 from enum import Enum, auto
 from typing import Tuple, Optional, Dict, Any
 
+# [추가] 설정 파일 임포트
+import config 
+
 # Modules & Engine
 from modules.vision_system import VisionSystem
 from modules.scanner import GameScanner
 from engine.map_processor import MapProcessor
 from engine.path_finder import PathFinder
+from engine.physics_engine import PhysicsEngine
 from core.action_handler import ActionHandler
-from utils.logger import logger
+from core.model_loader import ModelLoader
+from utils.logger import logger, trace_logic
+
 
 # [신규] DataRecorder (추후 구현될 파일, 없을 경우를 대비해 예외 처리)
 try:
@@ -49,39 +55,54 @@ class BotAgent:
 
         # 2. Intelligence Layer
         self.map_processor = MapProcessor()
-        self.path_finder = PathFinder(self.map_processor)
+        
+        # [수정] Physics Engine 로드 및 PathFinder 연결
+        self.physics_engine = PhysicsEngine()
+        # 모델 경로가 있다면 로드, 없으면 기본값 (나중에 UI에서 로드 가능)
+        self.physics_engine.load_model("physics_hybrid_model.pth") 
+        
+        self.path_finder = PathFinder(self.map_processor, self.physics_engine)
 
         if map_file_path:
             self.load_map(map_file_path)
-        else:
-            logger.warning("초기 맵 파일이 설정되지 않았습니다. GUI에서 맵을 로드해주세요.")
 
         if SkillStrategy:
             self.skill_strategy = SkillStrategy(self.path_finder)
         else:
             self.skill_strategy = None
 
-        # 3. Control Layer
-        self.action_handler = ActionHandler()
+        self.model_loader = ModelLoader()
 
-        # 4. Data Recording (신규)
+        # [★ 핵심 수정] ActionHandler를 하드웨어 모드로 초기화
+        # config.SERIAL_PORT가 설정되어 있다면 HARDWARE 모드로 시도합니다.
+        mode = "SOFTWARE"
+        port = getattr(config, 'SERIAL_PORT', None)
+        
+        if port:
+            logger.info(f"아두이노 포트 감지됨: {port} -> 하드웨어 모드 활성화")
+            mode = "HARDWARE"
+        
+        self.action_handler = ActionHandler(mode=mode, serial_port=port)
+
+        # 4. Data Recording
         self.recorder = None
         self.is_recording = False
 
-        # Agent State
+        # ... (나머지 초기화 코드 기존과 동일) ...
         self.state = BotState.IDLE
         self.running = False
         self.thread = None
-        
-        # Shared Context (현재 프레임 및 상태 캐싱)
         self.current_frame = None
         self.player_pos: Optional[Tuple[int, int]] = None
+        self.last_action = "None"
+        self.last_action_desc = ""
+        self.fps = 0.0
+        self.last_loop_time = time.time()
         
-        # [신규] UI 시각화를 위한 상태 추적 변수
-        self.last_action = "None"      # 현재 수행 중인 행동 이름 (예: "Jump", "Attack")
-        self.last_action_desc = ""     # 행동에 대한 상세 설명 (예: "Moving to (100, 20)")
+        # 키 매핑 저장소 (UI에서 주입됨)
+        self.key_mapping = {}
 
-        logger.info("BotAgent Initialized successfully.")
+        logger.info(f"BotAgent Initialized ({mode} Mode).")
 
     def load_map(self, file_path: str) -> bool:
         """JSON 맵 파일을 로드합니다."""
@@ -91,6 +112,12 @@ class BotAgent:
         else:
             logger.error(f"Failed to load map: {file_path}")
             return False
+        
+    def set_map_offset(self, x: int, y: int):
+        """UI에서 변경된 오프셋을 MapProcessor에 실시간으로 반영합니다."""
+        if self.map_processor:
+            self.map_processor.set_offset(x, y)
+            # logger.info(f"Map offset updated to: ({x}, {y})") # 필요 시 주석 해제
 
     def start(self):
         """봇 메인 루프 시작"""
@@ -121,6 +148,7 @@ class BotAgent:
     # =========================================================================
     # [신규 기능 2, 6] UI 데이터 공급 메서드
     # =========================================================================
+    #@trace_logic
     def get_debug_info(self) -> Dict[str, Any]:
         """UI 시각화를 위한 정보 패키징"""
         if not self.running:
@@ -141,6 +169,8 @@ class BotAgent:
             "state": self.state.name,
             "action": self.last_action,
             "action_desc": self.last_action_desc,
+
+            "fps": self.fps, # <--- UI로 FPS 전달
             
             # [추가] 킬 카운트 & 현재 발판 인덱스 전달
             "kill_count": self.scanner.current_kill_count,
@@ -178,17 +208,34 @@ class BotAgent:
             else:
                 logger.error("DataRecorder 모듈이 없어 녹화를 시작할 수 없습니다.")
 
+    @trace_logic
     def _main_loop(self):
         """
         Main Control Loop:
         Vision -> Scanner -> Intelligence -> Action
         """
+        self.last_loop_time = time.time()
+        
+        # [수정 1] 루프 진입 확인용 로그 추가
+        print(">>> [DEBUG] _main_loop 진입 성공! (스레드 시작됨)")
+
         while self.running:
             try:
+                current_time = time.time()
+                delta = current_time - self.last_loop_time
+                if delta > 0:
+                    current_fps = 1.0 / delta
+                    # 이전 값 90%, 새 값 10% 반영하여 부드럽게 표시
+                    self.fps = self.fps * 0.9 + current_fps * 0.1
+                self.last_loop_time = current_time
+
                 loop_start = time.time()
 
                 # --- 1. Perception Phase ---
+                # [수정 2] 인식 단계 전후로 로그 추가 (화면 캡처 등에서 멈추는지 확인)
+                # print(">>> [DEBUG] 1. 인식 시작") 
                 self._update_perception()
+                # print(">>> [DEBUG] 1. 인식 완료")
 
                 # --- 2. Safety Check ---
                 if not self.vision.window_found:
@@ -199,7 +246,7 @@ class BotAgent:
                     continue
 
                 if self.player_pos is None and self.state != BotState.IDLE:
-                    logger.warning("Player position lost during active state.")
+                    # logger.warning("Player position lost during active state.")
                     time.sleep(0.1)
                     continue
 
@@ -234,26 +281,64 @@ class BotAgent:
                     time.sleep(0.05 - elapsed)
 
             except Exception as e:
+                # [수정 3] 에러 발생 시 콘솔에 즉시 출력하도록 변경
+                print(f">>> [CRITICAL THREAD ERROR] {e}")
+                import traceback
+                traceback.print_exc()
+
                 logger.error(f"Critical Error in Main Loop: {e}")
                 logger.error(traceback.format_exc())
                 self.state = BotState.EMERGENCY
+        
+        # [수정 4] 루프 종료 로그
+        print(">>> [DEBUG] _main_loop 종료됨 (Running=False)")
 
+    #@trace_logic
     def _update_perception(self):
         """화면 캡처 및 상태 갱신"""
         self.current_frame = self.vision.capture()
         if self.current_frame is not None:
-            # 스캐너 업데이트
+            
+            # [기존 코드] VisionSystem의 ROI 정보를 Scanner에 동기화
+            if self.vision.minimap_roi:
+                self.scanner.set_rois(self.vision.minimap_roi, self.vision.kill_roi)
+
+            # [기존 코드] 스캐너 업데이트
             self.player_pos = self.scanner.find_player(self.current_frame)
-            self.scanner.update_skill_status(self.current_frame) # 쿨타임 확인 등
+            self.scanner.update_skill_status(self.current_frame)
+
+            # [▼ 추가된 코드] 좌표 기반 발판 추론 과정 기록
+            if self.player_pos:
+                px, py = self.player_pos
+                # 1. 맵 프로세서에게 "나 지금 어느 발판 위에 있어?"라고 물어봄
+                found_plat = self.map_processor.find_current_platform(px, py)
+                
+                # 2. 발판 ID 추출 (리스트 내 인덱스)
+                plat_id = -1
+                if found_plat in self.map_processor.platforms:
+                    plat_id = self.map_processor.platforms.index(found_plat)
+
+                # 3. 의사결정 로그에 기록 (decision_history.jsonl에 저장됨)
+                # -> 나중에 "좌표는 (100, 200)인데 왜 발판은 None이지?"를 분석 가능
+                logger.log_decision(
+                    step="Perception",          # 단계
+                    state=self.state.name,      # 현재 봇 상태
+                    decision=f"On_Plat_{plat_id}", # 결론: "발판 X번 위에 있음"
+                    reason="Position Updated",  # 이유
+                    current_pos=self.player_pos, # 입력 데이터 (좌표)
+                    platform_y=found_plat['y'] if found_plat else "N/A" # 인식된 발판 높이
+                )
 
     # --- State Handlers ---
 
+    @trace_logic
     def _handle_idle(self):
         """대기 상태"""
         self.last_action = "Idle"
         self.last_action_desc = "Waiting for user command..."
         time.sleep(0.1)
 
+    @trace_logic
     def _handle_maps(self):
         """맵 순찰 및 이동"""
         if not self.player_pos:
@@ -282,14 +367,33 @@ class BotAgent:
             logger.warning("Movement failed. Determining recovery action...")
             self.state = BotState.EMERGENCY
 
+    @trace_logic
     def _handle_combat(self):
-        """전투 로직"""
+        """전투 로직 (키 매핑 적용 수정)"""
+
+        if int(time.time()) % 10 == 0:
+            self.vision.activate_window()
+        
         if not self.player_pos:
             return
 
         action_plan = None
+        skill_key = None 
+
+        # 1. 스킬 전략 모듈에게 어떤 '스킬 이름'을 쓸지 물어봄
         if self.skill_strategy:
              action_plan = self.skill_strategy.decide_skill(self.player_pos, self.scanner.skill_status)
+
+        # 키 매핑 조회 로직
+        jump_key = 'alt'
+        attack_key = 'ctrl'
+        
+        if hasattr(self, 'key_mapping'):
+            if action_plan and action_plan in self.key_mapping:
+                skill_key = self.key_mapping[action_plan]
+            
+            if 'jump' in self.key_mapping: jump_key = self.key_mapping['jump']
+            if 'attack' in self.key_mapping: attack_key = self.key_mapping['attack']
 
         if not action_plan:
             action_plan = "basic_attack"
@@ -298,12 +402,35 @@ class BotAgent:
         self.last_action = action_plan
         self.last_action_desc = "Combat Routine"
 
-        # Action 실행
+        # 3. Action 실행
         if action_plan == "basic_attack":
-             direction = 'left' # TODO: 몬스터 위치 기반 방향 결정 로직 필요
-             self.action_handler.jump_shot(direction)
+             # TODO: 몬스터 위치 기반 방향 결정 로직 (scanner에서 몬스터 정보를 가져온다고 가정)
+             # 예: monsters = self.scanner.get_monsters() ...
+             
+             direction = 'left' # 현재는 하드코딩 되어 있음
+             decision_reason = "Default direction (No monster logic)" # 이유 설명
+
+             # [추가] 여기에 의사결정 로그를 남깁니다.
+             logger.log_decision(
+                 step="BotAgent",
+                 state="COMBAT",
+                 decision=f"JumpShot_{direction.upper()}",
+                 reason=decision_reason,
+                 details={"skill": "Basic Attack", "keys": f"{jump_key}+{attack_key}"}
+             )
+
+             # [수정] 찾아낸 점프/공격 키를 사용하여 점프샷
+             self.action_handler.jump_shot(direction, jump_key=jump_key, attack_key=attack_key)
         else:
-            self.action_handler.press(action_plan)
+            # 스킬 사용의 경우 SkillStrategy 내부에서 이미 로그를 남기지만,
+            # 실행 시점에도 기록하고 싶다면 아래 주석을 해제하세요.
+            # logger.log_decision("BotAgent", "COMBAT", f"Cast_{action_plan}", "Skill Strategy Executed")
+            
+            # 결정된 스킬 키가 있으면 누름
+            if skill_key:
+                self.action_handler.press(skill_key)
+            else:
+                logger.warning(f"스킬 [{action_plan}]에 매핑된 키를 찾을 수 없습니다.")
 
     def _handle_emergency(self):
         """에러 복구"""
@@ -350,3 +477,8 @@ class BotAgent:
             # 스캐너 업데이트
             self.player_pos = self.scanner.find_player(self.current_frame)
             self.scanner.update_skill_status(self.current_frame)
+
+    def set_map_offset(self, x: int, y: int):
+        self.map_processor.set_offset(x, y)
+
+    

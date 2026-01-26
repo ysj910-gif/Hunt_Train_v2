@@ -23,6 +23,10 @@ class MainWindow:
         self.job_mgr = JobManager()
         self.config_path = "config.json"
         
+        self.cur_map_path = ""
+        self.cur_lstm_path = ""
+        self.cur_rf_path = ""
+
         self.skill_tab = None
         self.map_tab = None
         self.status_panel = None # [신규]
@@ -65,29 +69,42 @@ class MainWindow:
         
         self.skill_tab = SkillTab(self.tabs, self.agent, self.job_mgr, self.save_settings)
         self.skill_tab.on_job_change_callback = self.on_job_change_handler
-        self.map_tab = MapTab(self.tabs, self.agent)
-
+        
+        # [수정] MapTab에도 save_settings 콜백 전달
+        self.map_tab = MapTab(self.tabs, self.agent, self.save_settings)
         # 4. 하단 컨트롤 패널
         self.create_bottom_panel()
 
+        # 디버그 모드 토글 버튼
+        self.chk_trace = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            self.frame_controls, 
+            text="상세 추적(Trace) 켜기", 
+            variable=self.chk_trace, 
+            command=self.toggle_trace_mode
+        ).pack(side="top", pady=5)
+
     def create_bottom_panel(self):
-        # ... (기존 코드와 동일) ...
-        frame = ttk.Frame(self.frame_right)
-        frame.pack(side="bottom", fill="x", padx=5, pady=10)
+        # [수정] frame 지역 변수 대신 self.frame_controls 멤버 변수 사용
+        # 그래야 setup_ui()에서 체크박스를 추가할 때 이 프레임을 찾을 수 있습니다.
+        self.frame_controls = ttk.Frame(self.frame_right)
+        self.frame_controls.pack(side="bottom", fill="x", padx=5, pady=10)
         
-        ttk.Button(frame, text="🔍 메이플 창 찾기", command=self.find_window_action).pack(fill="x", pady=2)
+        # 아래의 모든 frame 참조를 self.frame_controls로 변경
+        ttk.Button(self.frame_controls, text="🔍 메이플 창 찾기", command=self.find_window_action).pack(fill="x", pady=2)
         
-        roi_frame = ttk.Frame(frame)
+        roi_frame = ttk.Frame(self.frame_controls)
         roi_frame.pack(fill="x", pady=2)
         ttk.Button(roi_frame, text="🎯 킬 카운트 영역", command=lambda: self.open_roi_selector("kill")).pack(side="left", fill="x", expand=True)
         ttk.Button(roi_frame, text="🗺️ 미니맵 영역", command=lambda: self.open_roi_selector("minimap")).pack(side="right", fill="x", expand=True)
         
-        self.btn_record = ttk.Button(frame, text="⏺ REC (데이터 녹화)", command=self.toggle_recording_action)
+        self.btn_record = ttk.Button(self.frame_controls, text="⏺ REC (데이터 녹화)", command=self.toggle_recording_action)
         self.btn_record.pack(fill="x", pady=5)
         
-        self.btn_bot = ttk.Button(frame, text="🤖 AUTO HUNT (봇 가동)", command=self.toggle_bot_action)
+        self.btn_bot = ttk.Button(self.frame_controls, text="🤖 AUTO HUNT (봇 가동)", command=self.toggle_bot_action)
         self.btn_bot.pack(fill="x", ipady=10, pady=5)
-        self.lbl_bot_status = ttk.Label(frame, text="[BOT: OFF]", foreground="red", justify="center")
+        
+        self.lbl_bot_status = ttk.Label(self.frame_controls, text="[BOT: OFF]", foreground="red", justify="center")
         self.lbl_bot_status.pack()
 
     def update_ui_loop(self):
@@ -97,6 +114,10 @@ class MainWindow:
             return
 
         debug_info = self.agent.get_debug_info()
+
+        # [신규] 창 제목에 FPS 실시간 표시
+        current_fps = debug_info.get("fps", 0.0)
+        self.root.title(f"MapleHunter v2.0 - [FPS: {current_fps:.1f}]")
         
         # 1. 상태 패널 업데이트
         if self.status_panel:
@@ -135,18 +156,37 @@ class MainWindow:
             messagebox.showerror("실패", "창을 못 찾았습니다.")
 
     def toggle_bot_action(self):
-        if self.agent.running:
-            self.agent.stop()
-            self.btn_bot.config(text="🤖 AUTO HUNT (봇 가동)")
-            self.lbl_bot_status.config(text="[BOT: OFF]", foreground="red")
-            self.status_panel.log("Bot stopped by user.")
-        else:
-            self.agent.start()
-            self.btn_bot.config(text="⏹ STOP BOT", state="normal")
-            self.lbl_bot_status.config(text="[BOT: ON]", foreground="green")
-            self.status_panel.log("Bot started.")
+        print(">>> [DEBUG] AUTO HUNT 버튼 클릭됨!") # 클릭 확인용 로그
+        
+        try:
+            if self.agent.running:
+                print(">>> [DEBUG] 봇 정지 요청")
+                self.agent.stop()
+                self.btn_bot.config(text="🤖 AUTO HUNT (봇 가동)")
+                self.lbl_bot_status.config(text="[BOT: OFF]", foreground="red")
+                if self.status_panel: self.status_panel.log("Bot stopped by user.")
+            else:
+                print(">>> [DEBUG] 봇 시작 요청")
+                
+                # [중요] 봇 시작 전 상태 체크
+                if not self.agent.map_processor.platforms:
+                    print(">>> [DEBUG] 경고: 맵 데이터가 없음")
+                
+                self.agent.start()
+                self.agent.set_state('COMBAT') # 강제 전투 모드 진입
+                
+                print(f">>> [DEBUG] 봇 스레드 시작됨 (Running: {self.agent.running})")
+                
+                self.btn_bot.config(text="⏹ STOP BOT", state="normal")
+                self.lbl_bot_status.config(text="[BOT: ON]", foreground="green")
+                if self.status_panel: self.status_panel.log("Bot started.")
+                
+        except Exception as e:
+            print(f">>> [CRITICAL ERROR] 봇 시작 중 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("오류", f"봇 시작 실패:\n{e}")
 
-    # ... (open_roi_selector, toggle_recording_action 등 기존 유지) ...
     # (코드 중략: 기존 메서드들은 변경 사항 없음)
     def open_roi_selector(self, target):
         if not self.agent.vision.window_found:
@@ -165,8 +205,16 @@ class MainWindow:
         self.load_settings(job_name_override=new_job)
         self.last_selected_job = new_job
 
-    def save_settings(self, job_name_override=None):
-        # (기존 save_settings 코드 그대로 사용)
+    def save_settings(self, job_name_override=None, **kwargs):
+        """
+        설정 저장 (kwargs를 통해 호출 출처에서 전달된 경로 정보 등도 처리)
+        """
+        # 외부에서 전달된 경로 정보가 있다면 내부 변수 업데이트
+        if 'map_path' in kwargs: self.cur_map_path = kwargs['map_path']
+        if 'model_path' in kwargs: self.cur_lstm_path = kwargs['model_path']
+        if 'physics_path' in kwargs: self.cur_rf_path = kwargs['physics_path']
+
+        # 직업 선택 콤보박스 참조 수정 (SkillTab 내부)
         target_job = job_name_override if job_name_override else self.skill_tab.combo_job.get()
         if not target_job: return
 
@@ -176,27 +224,51 @@ class MainWindow:
                 with open(self.config_path, 'r', encoding='utf-8') as f: data = json.load(f)
             except: pass
         
+        # 공통 설정 저장
         data["last_job"] = self.skill_tab.combo_job.get()
+        
+        # [★수정] MainWindow의 변수가 아니라 MapTab의 변수를 참조하도록 변경
         data["map_offset_x"] = self.map_tab.map_offset_x
         data["map_offset_y"] = self.map_tab.map_offset_y
-        data["minimap_roi"] = self.agent.vision.minimap_roi
-        data["kill_roi"] = self.agent.vision.kill_roi
-        data["skill_rois"] = self.agent.vision.skill_rois
+
+        # ROI 설정 저장
+        if self.agent.vision.minimap_roi:
+            data["minimap_roi"] = self.agent.vision.minimap_roi
+        if self.agent.vision.kill_roi:
+            data["kill_roi"] = self.agent.vision.kill_roi
+        if self.agent.vision.skill_rois:
+            data["skill_rois"] = self.agent.vision.skill_rois
+
+        # 파일 경로 저장
+        data["last_map_path"] = self.cur_map_path
+        data["last_lstm_path"] = self.cur_lstm_path
+        data["last_rf_path"] = self.cur_rf_path
 
         if "job_settings" not in data: data["job_settings"] = {}
         
+        # 스킬 설정 저장
         s_data = []
         for r in self.skill_tab.skill_rows:
             try:
                 if r['frame'].winfo_exists():
-                    s_data.append({"name": r['name'].get(), "key": r['key'].get(), "cd": r['cd'].get(), "dur": r['dur'].get()})
+                    s_data.append({
+                        "name": r['name'].get(), 
+                        "key": r['key'].get(), 
+                        "cd": r['cd'].get(), 
+                        "dur": r['dur'].get()
+                    })
             except: pass
             
         i_data = []
         for r in self.skill_tab.install_rows:
             try:
                 if r['frame'].winfo_exists():
-                    i_data.append({"name": r['name'].get(), "key": r['key'].get(), "range": r['range'].get(), "dur": r['dur'].get()})
+                    i_data.append({
+                        "name": r['name'].get(), 
+                        "key": r['key'].get(), 
+                        "range": r['range'].get(), 
+                        "dur": r['dur'].get()
+                    })
             except: pass
             
         data["job_settings"][target_job] = {"skills": s_data, "installs": i_data}
@@ -204,18 +276,51 @@ class MainWindow:
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
-            if not job_name_override:
+            
+            # 자동 저장(kwargs 호출)이 아닌 경우에만 메시지 표시
+            if not job_name_override and not kwargs:
                 messagebox.showinfo("저장", "설정이 저장되었습니다.")
-                self.status_panel.log(f"Settings saved for {target_job}.")
+                if self.status_panel: self.status_panel.log(f"Settings saved for {target_job}.")
+                
         except Exception as e:
             print(f"저장 실패: {e}")
 
     def load_settings(self, job_name_override=None):
-        # (기존 load_settings 코드 그대로 사용)
         if not os.path.exists(self.config_path): return
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f: data = json.load(f)
             
+            # [추가 1] 최근 맵 파일 자동 로드
+            last_map = data.get("last_map_path", "")
+            if last_map and os.path.exists(last_map):
+                self.cur_map_path = last_map
+                if self.agent.load_map(last_map):
+                    print(f"✅ 자동 맵 로드 완료: {os.path.basename(last_map)}")
+            
+            # [추가 2] 최근 AI 모델(LSTM) 자동 로드
+            last_lstm = data.get("last_lstm_path", "")
+            if last_lstm and os.path.exists(last_lstm):
+                self.cur_lstm_path = last_lstm
+                if hasattr(self.agent, 'model_loader'):
+                    # ModelLoader를 통해 모델 로드 시도
+                    try:
+                        self.agent.model_loader.load_model(last_lstm)
+                        print(f"✅ 자동 AI 모델 로드 완료: {os.path.basename(last_lstm)}")
+                    except Exception as e:
+                        print(f"❌ AI 모델 자동 로드 실패: {e}")
+
+            # [추가 3] 최근 물리 모델(Physics) 자동 로드
+            last_rf = data.get("last_rf_path", "")
+            if last_rf and os.path.exists(last_rf):
+                self.cur_rf_path = last_rf
+                if hasattr(self.agent, 'physics_engine'):
+                    try:
+                        self.agent.physics_engine.load_model(last_rf)
+                        print(f"✅ 자동 물리 모델 로드 완료: {os.path.basename(last_rf)}")
+                    except Exception as e:
+                        print(f"❌ 물리 모델 자동 로드 실패: {e}")
+
+            # --- 기존 설정 로드 로직 ---
             last_job = data.get("last_job", "")
             if not job_name_override and last_job:
                 self.skill_tab.combo_job.set(last_job)
@@ -223,13 +328,22 @@ class MainWindow:
                 
             self.map_tab.map_offset_x = data.get("map_offset_x", 0)
             self.map_tab.map_offset_y = data.get("map_offset_y", 0)
-            self.map_tab.adjust_offset(0, 0)
+            self.agent.set_map_offset(self.map_tab.map_offset_x, self.map_tab.map_offset_y)            
+            self.map_tab.adjust_offset(0, 0) 
             
             if data.get("minimap_roi"): self.agent.vision.set_minimap_roi(tuple(data["minimap_roi"]))
             if data.get("kill_roi"): self.agent.vision.set_roi(tuple(data["kill_roi"]))
             for n, i in data.get("skill_rois", {}).items():
-                self.agent.vision.set_skill_roi(n, tuple(i['rect']), threshold=i['threshold'])
-            
+                rect = tuple(i['rect'])
+                thresh = i['threshold']
+                
+                # 1. VisionSystem에 등록 (기존 코드)
+                self.agent.vision.set_skill_roi(n, rect, threshold=thresh)
+                
+                # 2. Scanner에 등록 (봇 판단용 - 추가해야 할 부분)
+                if self.agent.scanner:
+                    self.agent.scanner.register_skill(n, rect, threshold=thresh)
+
             target = job_name_override if job_name_override else last_job
             j_data = data.get("job_settings", {}).get(target, {})
             
@@ -242,6 +356,68 @@ class MainWindow:
                 self.skill_tab.add_skill_row(s["name"], s["key"], s["cd"], s["dur"])
             for i in j_data.get("installs", []):
                 self.skill_tab.add_install_row(i["name"], i["key"], i["range"], i["dur"])
-                
+
+            # 키 매핑 업데이트
+            if self.agent:
+                key_mapping = {}
+                for r in self.skill_tab.skill_rows:
+                    try:
+                        name = r['name'].get()
+                        key = r['key'].get()
+                        if name and key:
+                            key_mapping[name] = key.lower()
+                    except: pass
+                for r in self.skill_tab.install_rows:
+                    try:
+                        name = r['name'].get()
+                        key = r['key'].get()
+                        if name and key:
+                            key_mapping[name] = key.lower()
+                    except: pass
+                self.agent.key_mapping = key_mapping
+                print(f"BotAgent Key Mapping Updated: {key_mapping}")
+
+                if self.agent.skill_strategy:
+                    # 기존 정보 초기화
+                    self.agent.skill_strategy.skills = {}
+                    
+                    target = job_name_override if job_name_override else last_job
+                    j_data = data.get("job_settings", {}).get(target, {})
+
+                    # 1. 일반 스킬 등록
+                    for s in j_data.get("skills", []):
+                        name = s["name"]
+                        # 지속시간(dur)이 있으면 버프, 없으면 주력기(main)로 간주
+                        try:
+                            dur = float(s.get("dur", 0))
+                            s_type = "buff" if dur > 0 else "main"
+                            cd = float(s.get("cd", 0))
+                        except:
+                            s_type = "main"; cd = 0
+                            
+                        self.agent.skill_strategy.register_skill_info(name, s_type, cd)
+                        print(f"전략 등록(Skill): {name} [{s_type}]")
+
+                    # 2. 설치기 등록 (중요: 위치 로직 무시하고 쿨마다 쓰게 하려면 'buff'로 등록)
+                    for i in j_data.get("installs", []):
+                        name = i["name"]
+                        # 설치기지만 'buff' 타입으로 등록하여 쿨타임마다 즉시 사용 유도
+                        # (Scanner가 쿨타임을 관리하므로 여기서 CD 값은 크게 중요하지 않음)
+                        self.agent.skill_strategy.register_skill_info(name, "buff", 0)
+                        print(f"전략 등록(Install->Buff): {name}")
+
+            if self.map_tab:
+                self.map_tab.update_info(
+                    map_path=self.cur_map_path,
+                    lstm_path=self.cur_lstm_path,
+                    rf_path=self.cur_rf_path
+                )
+                    
         except Exception as e:
-            print(f"로드 오류: {e}")
+            print(f"설정 로드 중 오류 발생: {e}")
+
+    def toggle_trace_mode(self):
+        from utils.logger import logger
+        # 체크박스 상태에 따라 로거의 스위치를 켬/끔
+        is_on = self.chk_trace.get()
+        logger.set_tracing(is_on)

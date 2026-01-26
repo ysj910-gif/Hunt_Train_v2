@@ -10,6 +10,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from utils.logger import logger
 from core.bot_agent import BotAgent
 from ui.main_window import MainWindow
+from utils.port_manager import PortManager
+import config  # config.py를 임포트한다고 가정
+
+detected_port = PortManager.update_config("config.py")
+
+if detected_port:
+    config.SERIAL_PORT = detected_port
 
 def setup_environment():
     """윈도우 환경 설정 (DPI 인식, 콘솔 타이틀 등)"""

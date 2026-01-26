@@ -4,15 +4,12 @@ import time
 import math
 import json
 import ctypes
-import random
 import threading
 from typing import Callable, Tuple, Optional
-
-# [수정] 시리얼 통신 라이브러리 추가 (하드웨어 모드용)
 import serial 
-
 from utils.logger import logger
 from utils.physics_utils import PhysicsUtils, MovementTracker
+from utils.logger import logger, trace_logic
 
 # --- Low Level Input Definition (Windows API) ---
 SendInput = ctypes.windll.user32.SendInput
@@ -42,18 +39,26 @@ class ActionHandler:
     Control Layer의 핵심 실행부입니다.
     Intelligence Layer의 의도(Intent)를 실제 하드웨어/소프트웨어 입력으로 변환합니다.
     """
-
-    # 키 매핑 (Scancode)
-    KEY_MAP = {
-        'left': 0xCB, 'right': 0xCD, 'up': 0xC8, 'down': 0xD0,
-        'jump': 0x38,     # Alt
-        'attack': 0x1D,   # Ctrl
+    
+    # [수정] 확장된 DirectInput 스캔코드 매핑 (대소문자 무관 처리를 위해 소문자로 작성)
+    SCANCODE_MAP = {
+        'esc': 0x01, '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06, '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A, '0': 0x0B,
+        '-': 0x0C, '=': 0x0D, 'backspace': 0x0E, 'tab': 0x0F,
+        'q': 0x10, 'w': 0x11, 'e': 0x12, 'r': 0x13, 't': 0x14, 'y': 0x15, 'u': 0x16, 'i': 0x17, 'o': 0x18, 'p': 0x19, '[': 0x1A, ']': 0x1B, 'enter': 0x1C, 'ctrl': 0x1D,
+        'a': 0x1E, 's': 0x1F, 'd': 0x20, 'f': 0x21, 'g': 0x22, 'h': 0x23, 'j': 0x24, 'k': 0x25, 'l': 0x26, ';': 0x27, "'": 0x28, '`': 0x29, 'shift': 0x2A, '\\': 0x2B,
+        'z': 0x2C, 'x': 0x2D, 'c': 0x2E, 'v': 0x2F, 'b': 0x30, 'n': 0x31, 'm': 0x32, ',': 0x33, '.': 0x34, '/': 0x35, 'shift_r': 0x36,
+        'alt': 0x38, 'space': 0x39, 'caps': 0x3A,
+        'f1': 0x3B, 'f2': 0x3C, 'f3': 0x3D, 'f4': 0x3E, 'f5': 0x3F, 'f6': 0x40, 'f7': 0x41, 'f8': 0x42, 'f9': 0x43, 'f10': 0x44,
+        'num_lock': 0x45, 'scroll_lock': 0x46,
+        'up': 0xC8, 'left': 0xCB, 'right': 0xCD, 'down': 0xD0,
+        'insert': 0xD2, 'delete': 0xD3, 'home': 0xC7, 'end': 0xCF, 'pageup': 0xC9, 'pagedown': 0xD1,
+        # 별칭(Alias) 처리
+        'jump': 0x38,     # Alt (기본값)
+        'attack': 0x1D,   # Ctrl (기본값)
         'loot': 0x2C,     # Z
         'interact': 0x39, # Space
-        'rope': 0x2E,     # C (예시)
     }
 
-    # [수정 1] __init__ 시그니처 변경 (main.py 호환)
     def __init__(self, mode: str = "SOFTWARE", serial_port: str = None, physics_config_path: str = "physics_engine.json"):
         self.mode = mode.upper()
         self.serial = None
@@ -63,7 +68,7 @@ class ActionHandler:
         self.physics_data = self._load_physics_config(physics_config_path)
         self.tracker = MovementTracker()
         
-        # 물리 상수 캐싱 (기본값 안전하게 설정)
+        # 물리 상수 캐싱
         self.walk_acc = self.physics_data.get('walk_acceleration', 15.0)
         self.max_walk_speed = self.physics_data.get('max_walk_velocity', 125.0)
         
@@ -75,13 +80,13 @@ class ActionHandler:
                     logger.info(f"ActionHandler: Hardware Mode Initialized ({serial_port})")
                 except Exception as e:
                     logger.error(f"Serial Connection Failed: {e}")
-                    self.mode = "SOFTWARE" # 실패 시 소프트웨어 모드로 폴백
+                    self.mode = "SOFTWARE" 
             else:
                 logger.warning("Serial Port not provided. Falling back to SOFTWARE mode.")
                 self.mode = "SOFTWARE"
         
         if self.mode == "SOFTWARE":
-            logger.info("ActionHandler: Software Mode (DirectInput) Initialized.")
+            logger.info("ActionHandler: Software Mode (DirectInput Extended) Initialized.")
 
     def _load_physics_config(self, path: str) -> dict:
         try:
@@ -93,8 +98,24 @@ class ActionHandler:
 
     # --- Low Level Input Methods ---
 
+    def _get_scan_code(self, key_name: str) -> int:
+        """키 이름을 스캔코드로 변환 (대소문자 무관)"""
+        key = str(key_name).lower()
+        return self.SCANCODE_MAP.get(key, 0)
+
+    #@trace_logic
     def _send_key_software(self, key_code: int, pressed: bool):
         """DirectInput 방식 (SendInput)"""
+        if key_code == 0: return # 매핑되지 않은 키 무시
+
+        # [디버깅용 로그 추가] 현재 키 입력을 받고 있는 창의 제목 확인
+        # (너무 자주 뜨면 주석 처리하세요)
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        buff = ctypes.create_unicode_buffer(length + 1)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+        logger.debug(f"[Input Target] '{buff.value}' (Key: {key_code})")
+
         extra = ctypes.c_ulong(0)
         ii_ = InputWrapper()
         
@@ -107,31 +128,38 @@ class ActionHandler:
         SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
     def _send_key_hardware(self, key_name: str, pressed: bool):
-        """Arduino Serial 통신 방식"""
+        """Arduino Serial 통신 방식 (사용자 아두이노 코드 호환용)"""
         if not self.serial: return
         
-        # 프로토콜 예시: "D,jump\n" (Down), "U,jump\n" (Up)
-        cmd = "D" if pressed else "U"
-        payload = f"{cmd},{key_name}\n"
+        # 1. 아두이노가 기대하는 명령어: P(누름), R(뗌)
+        cmd = "P" if pressed else "R"
+        
+        # 2. 아두이노가 기대하는 포맷: 쉼표 없이 붙여서 전송 (예: "Pleft\n")
+        # 제공해주신 아두이노 코드는 '\n'을 만나야 명령을 처리하므로 개행문자 추가 필수
+        payload = f"{cmd}{key_name}\n"
+        
         try:
             self.serial.write(payload.encode())
         except Exception as e:
             logger.error(f"Serial Write Error: {e}")
 
-    # [수정 2] 모드에 따른 분기 처리
+    # [수정] 모드에 따른 분기 처리 및 키 매핑 적용
+    @trace_logic
     def key_down(self, key_name: str):
-        if key_name not in self.KEY_MAP: return
-
         if self.mode == "SOFTWARE":
-            self._send_key_software(self.KEY_MAP[key_name], True)
+            code = self._get_scan_code(key_name)
+            if code == 0:
+                # logger.debug(f"Unknown key: {key_name}") # 디버깅용
+                pass
+            self._send_key_software(code, True)
         elif self.mode == "HARDWARE":
             self._send_key_hardware(key_name, True)
 
+    @trace_logic
     def key_up(self, key_name: str):
-        if key_name not in self.KEY_MAP: return
-
         if self.mode == "SOFTWARE":
-            self._send_key_software(self.KEY_MAP[key_name], False)
+            code = self._get_scan_code(key_name)
+            self._send_key_software(code, False)
         elif self.mode == "HARDWARE":
             self._send_key_hardware(key_name, False)
 
@@ -142,7 +170,7 @@ class ActionHandler:
         self.key_up(key_name)
         time.sleep(0.02)
 
-    # --- Physics & Feedback Control Logic (기존 로직 유지) ---
+    # --- Physics & Feedback Control Logic (기존 유지) ---
 
     def calculate_press_time(self, distance: float) -> float:
         """물리 공식 기반 필요 이동 시간 계산"""
@@ -217,17 +245,23 @@ class ActionHandler:
             return PhysicsUtils.calc_distance(now_pos, self.tracker.prev_pos) > 10
         return False
 
-    def jump_shot(self, direction: Optional[str] = None):
+    @trace_logic
+    def jump_shot(self, direction: Optional[str] = None, jump_key: str = 'jump', attack_key: str = 'attack'):
+        """
+        [수정] 점프 및 공격 키를 인자로 받아 유연하게 처리
+        """
         if direction: self.key_down(direction)
-        self.press('jump', 0.1)
+        self.press(jump_key, 0.1)
         time.sleep(0.05)
-        self.press('attack', 0.1)
+        self.press(attack_key, 0.1)
         if direction:
             time.sleep(0.1)
             self.key_up(direction)
 
     def emergency_stop(self):
         self._stop_event.set()
-        for key in self.KEY_MAP:
+        # 모든 주요 키 Release 시도
+        keys_to_release = ['left', 'right', 'up', 'down', 'alt', 'ctrl', 'shift', 'space']
+        for key in keys_to_release:
             self.key_up(key)
         logger.info("EMERGENCY STOP executed.")

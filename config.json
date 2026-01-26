@@ -1,7 +1,7 @@
 {
     "last_job": "Kinesis",
-    "map_offset_x": -8,
-    "map_offset_y": -28,
+    "map_offset_x": -10,
+    "map_offset_y": 0,
     "minimap_roi": [
         9,
         69,
@@ -101,5 +101,8 @@
                 }
             ]
         }
-    }
+    },
+    "last_map_path": "C:/Users/ysj92/OneDrive/바탕 화면 ★/[Code]/Maple_Arduino/Hunt_train/Corrected_Royal_Library_6.json",
+    "last_lstm_path": "C:/Users/ysj92/OneDrive/바탕 화면 ★/[Code]/Maple_Arduino/Hunt_train/train/best_gru_model_boost.pth",
+    "last_rf_path": "C:/Users/ysj92/OneDrive/바탕 화면 ★/[Code]/Maple_Arduino/Hunt_train/train/physics_hybrid_model.pth"
 }

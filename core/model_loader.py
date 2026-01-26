@@ -3,7 +3,7 @@
 import torch
 import numpy as np
 import pandas as pd
-from modules.model import LSTMModel
+from modules.model import LSTMModel, GRUModel
 from utils.logger import logger
 
 class ModelLoader:
@@ -20,46 +20,84 @@ class ModelLoader:
         self.is_loaded = False
 
     def load_model(self, file_path):
-        """체크포인트 파일(*.pkl)에서 모델과 스케일러를 복원"""
         if not file_path:
             return False
             
         try:
-            # weights_only=False는 pickle 로드를 위해 필요 (보안상 신뢰할 수 있는 파일만 로드)
-            checkpoint = torch.load(file_path, map_location=self.device)
+            # weights_only=False 설정 확인
+            checkpoint = torch.load(file_path, map_location=self.device, weights_only=False)
             
             self.scaler = checkpoint.get('scaler')
             self.encoder = checkpoint.get('encoder')
             self.feature_cols = checkpoint.get('feature_cols', [])
             self.seq_length = checkpoint.get('seq_length', 10)
             
-            # 모델 초기화 파라미터 복원
+            # 기본 파라미터 복원
             input_size = checkpoint.get('input_size', len(self.feature_cols))
             num_classes = len(self.encoder.classes_) if self.encoder else 0
             
-            # 직업 인코더가 있다면 직업 수 파악, 없으면 기본값
-            job_encoder = checkpoint.get('job_encoder')
-            num_jobs = len(job_encoder.classes_) if job_encoder else 10
+            # [★ 핵심 수정] 모델 구조 및 하이퍼파라미터 자동 감지
+            model_state = checkpoint['model_state']
             
-            # 모델 생성 및 가중치 로드
-            self.model = LSTMModel(
-                input_size=input_size, 
-                hidden_size=256, 
-                num_layers=3, 
-                num_classes=num_classes, 
-                num_jobs=num_jobs, 
-                dropout=0.3
-            ).to(self.device)
+            # 1. 임베딩 차원 및 직업 수 감지
+            if 'job_embedding.weight' in model_state:
+                emb_shape = model_state['job_embedding.weight'].shape
+                # shape가 [N, D] 일 때, N=num_jobs+1, D=embedding_dim
+                num_jobs = emb_shape[0] - 1
+                embedding_dim = emb_shape[1]
+                logger.info(f"파라미터 감지: num_jobs={num_jobs}, embedding_dim={embedding_dim}")
+            else:
+                num_jobs = 10
+                embedding_dim = 8 # 기본값
+
+            # 2. LSTM vs GRU 자동 감지 (가중치 크기 비율로 판단)
+            # LSTM hidden size=256 -> weight size=1024 (4배)
+            # GRU hidden size=256 -> weight size=768 (3배)
+            is_gru = False
+            for key in model_state.keys():
+                if 'weight_ih_l0' in key: # 첫 번째 레이어 가중치 확인
+                    weight_size = model_state[key].shape[0]
+                    if weight_size == 768: # 256 * 3
+                        is_gru = True
+                    elif weight_size == 1024: # 256 * 4
+                        is_gru = False
+                    break
             
-            self.model.load_state_dict(checkpoint['model_state'])
-            self.model.eval() # 추론 모드 전환
+            # 모델 생성
+            if is_gru:
+                logger.info(f"모델 타입 감지: GRU ({file_path})")
+                self.model = GRUModel(
+                    input_size=input_size, 
+                    hidden_size=256, 
+                    num_layers=3, 
+                    num_classes=num_classes, 
+                    num_jobs=num_jobs, 
+                    dropout=0.3,
+                    embedding_dim=embedding_dim # 감지된 값 사용
+                ).to(self.device)
+            else:
+                logger.info(f"모델 타입 감지: LSTM ({file_path})")
+                self.model = LSTMModel(
+                    input_size=input_size, 
+                    hidden_size=256, 
+                    num_layers=3, 
+                    num_classes=num_classes, 
+                    num_jobs=num_jobs, 
+                    dropout=0.3,
+                    embedding_dim=embedding_dim # 감지된 값 사용
+                ).to(self.device)
+            
+            self.model.load_state_dict(model_state)
+            self.model.eval()
             
             self.is_loaded = True
-            logger.info(f"AI 모델 로드 성공: {file_path} (Device: {self.device})")
+            logger.info(f"AI 모델 로드 성공 (Device: {self.device})")
             return True
             
         except Exception as e:
             logger.error(f"AI 모델 로드 중 치명적 오류: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             self.is_loaded = False
             return False
 

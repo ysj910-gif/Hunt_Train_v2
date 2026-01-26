@@ -2,7 +2,7 @@
 
 import json
 import numpy as np
-from utils.logger import logger
+from utils.logger import logger, trace_logic
 from utils.physics_utils import PhysicsUtils
 
 class MapProcessor:
@@ -16,10 +16,13 @@ class MapProcessor:
         self.portals = []
         self.map_name = ""
         
+        # UI에서 설정한 오프셋 값을 저장할 변수
+        self.offset_x = 0
+        self.offset_y = 0
+        
     def load_map(self, file_path: str) -> bool:
         """
         JSON 형식의 맵 파일을 로드하여 메모리에 저장합니다.
-       
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -36,73 +39,101 @@ class MapProcessor:
             logger.error(f"맵 로드 실패 ({file_path}): {e}")
             return False
 
+    def set_offset(self, x: int, y: int):
+        """
+        UI에서 조정된 맵 오프셋 값을 업데이트합니다.
+        """
+        self.offset_x = x
+        self.offset_y = y
+
     def find_current_platform(self, x: int, y: int):
         """
-        현재 좌표(x, y)에서 캐릭터가 딛고 있는 가장 적절한 발판을 찾습니다.
-        
-        Args:
-            x, y: 캐릭터의 현재 미니맵 좌표
-        Returns:
-            dict: 발판 정보 (없으면 None)
+        현재 좌표(x, y)에서 캐릭터가 '실제로 밟고 있는' 발판을 찾습니다.
         """
+        chk_x = x - self.offset_x
+        chk_y = y - self.offset_y
+
         candidate_platforms = []
         
-        for plat in self.platforms:
-            # x축 범위 내에 있는지 확인
-            if plat['x_start'] <= x <= plat['x_end']:
-                # 캐릭터 발 밑에 있는 발판들 중 가장 가까운 것 (y값이 큰 것이 아래쪽)
-                # 발판 y값은 보통 캐릭터 발 위치보다 약간 아래에 위치함
-                if plat['y'] >= y - 5: # 오차 범위 5픽셀 허용
-                    candidate_platforms.append(plat)
+        for idx, plat in enumerate(self.platforms):
+            # 1. X축 범위 검사
+            if plat['x_start'] <= chk_x <= plat['x_end']:
+                
+                # 2. Y축 정밀 검사 ("위로만 3픽셀")
+                # diff = 발판높이 - 캐릭터발높이
+                # diff > 0: 캐릭터가 발판 위에 떠 있음 (Jump/Fall)
+                # diff < 0: 캐릭터가 발판 아래로 잠김 (오차)
+                diff = plat['y'] - chk_y
+                
+                # [수정된 조건]
+                # -3 <= diff: 발이 발판 아래로 3픽셀까지 잠기는 것 허용 (오차 보정)
+                # diff <= 3:  발이 발판 위로 3픽셀까지만 떠 있는 것 허용 (그 이상은 점프 중)
+                if -3 <= diff <= 3:
+                    candidate_platforms.append((abs(diff), idx, plat))
         
+        step_name = "MapProcessor"
+        state_name = "LOCATE_PLATFORM"
+
+        # 후보가 없으면 "공중(Air)" 상태
         if not candidate_platforms:
+            #logger.log_decision(
+            #    step=step_name,
+            #    state=state_name,
+            #    decision="FAIL", 
+            #    reason="In Air (Diff > 3px)",
+            #    current_pos_adj=(chk_x, chk_y),
+            #    check_y_threshold="-3 <= diff <= 3"
+            #)
             return None
             
-        # y값 차이가 가장 적은(가장 가까운 바닥) 발판 반환
-        return min(candidate_platforms, key=lambda p: abs(p['y'] - y))
+        # 가장 가까운 발판 선택
+        best_diff, best_idx, best_plat = min(candidate_platforms, key=lambda p: p[0])
+
+        #logger.log_decision(
+        #    step=step_name,
+        #    state=state_name,
+        #    decision=f"Platform_Idx_{best_idx}",
+        #    reason=f"Landed (Diff: {best_diff})",
+        #    current_pos_adj=(chk_x, chk_y),
+        #    selected_plat_y=best_plat['y']
+        #)
+
+        return best_plat
 
     def get_nearest_spawn(self, x: int, y: int):
-        """
-        현재 위치에서 가장 가까운 몬스터 스폰 포인트를 찾습니다.
-       
-        """
         if not self.spawns:
             return None
+        
+        # 여기도 부호 변경 (- offset)
+        chk_x = x - self.offset_x
+        chk_y = y - self.offset_y
             
-        return min(self.spawns, key=lambda s: PhysicsUtils.calc_distance((x, y), (s['x'], s['y'])))
+        return min(self.spawns, key=lambda s: PhysicsUtils.calc_distance((chk_x, chk_y), (s['x'], s['y'])))
 
     def get_ground_y(self, x: int, current_y: int) -> int:
-        """
-        특정 X 좌표에서 현재 높이 기준 가장 가까운 바닥의 Y 좌표를 반환합니다.
-        좌표 보정 및 추락 판정에 사용됩니다.
-        """
         plat = self.find_current_platform(x, current_y)
         if plat:
             return plat['y']
         
-        # 발판을 못 찾은 경우 맵의 가장 낮은 발판(최하단 바닥) 반환
         if self.platforms:
             return max(self.platforms, key=lambda p: p['y'])['y']
             
-        return current_y
+        # 못 찾으면 보정된 좌표 반환 (부호 변경 확인)
+        return current_y - self.offset_y
 
     def is_on_edge(self, x: int, y: int, threshold: int = 5) -> str:
-        """
-        현재 발판의 끝에 도달했는지 확인합니다. (낙사 방지 및 이동 판단용)
-        
-        Returns:
-            'left_edge', 'right_edge', 'middle'
-        """
         plat = self.find_current_platform(x, y)
         if not plat:
             return 'none'
+        
+        # 부호 변경 (- offset)
+        chk_x = x - self.offset_x
             
-        if x <= plat['x_start'] + threshold:
+        if chk_x <= plat['x_start'] + threshold:
             return 'left_edge'
-        elif x >= plat['x_end'] - threshold:
+        elif chk_x >= plat['x_end'] - threshold:
             return 'right_edge'
         return 'middle'
 
     def get_all_platforms_at_y(self, y_target: int, tolerance: int = 2):
-        """특정 높이에 있는 모든 발판 목록을 가져옵니다 (층 단위 분석용)"""
         return [p for p in self.platforms if abs(p['y'] - y_target) <= tolerance]

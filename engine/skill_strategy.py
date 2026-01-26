@@ -1,7 +1,7 @@
 # engine/skill_strategy.py
 
 import time
-from utils.logger import logger
+from utils.logger import logger, trace_logic
 from utils.physics_utils import PhysicsUtils
 
 class SkillStrategy:
@@ -29,20 +29,17 @@ class SkillStrategy:
             "priority": self.skill_priorities.get(skill_type, 9)
         }
 
+    @trace_logic
     def decide_skill(self, current_pos, scanner_status):
         """
         현재 상황에서 가장 적절한 스킬 사용을 결정합니다.
-        
-        Args:
-            current_pos: (x, y) 현재 좌표
-            scanner_status: {skill_name: is_available} Scanner로부터 받은 상태
-        Returns:
-            str: 결정된 스킬 이름 (없으면 None)
         """
         available_skills = []
 
         for name, status in scanner_status.items():
-            if status and name in self.skills:
+            # [수정 전] if status and name in self.skills:
+            # [수정 후] status가 False(쿨타임 아님)일 때 사용 가능
+            if not status and name in self.skills:
                 available_skills.append(name)
 
         if not available_skills:

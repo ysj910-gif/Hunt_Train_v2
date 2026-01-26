@@ -1,7 +1,7 @@
 # engine/path_finder.py
 
 import time
-from utils.logger import logger
+from utils.logger import logger, trace_logic
 from utils.physics_utils import PhysicsUtils
 
 class PathFinder:
@@ -9,8 +9,9 @@ class PathFinder:
     맵 데이터를 분석하여 캐릭터의 이동 경로와 전투 전략을 결정합니다.
     순찰 로직, 설치기 위치 선정, 추상화된 이동 커맨드 생성을 담당합니다.
     """
-    def __init__(self, map_processor):
+    def __init__(self, map_processor, physics_engine=None):
         self.map_processor = map_processor
+        self.physics_engine = physics_engine  # 물리 엔진 저장
         self.installed_objects = {}  # {name: {'pos': (x, y), 'expire_time': timestamp}}
         self.current_target_spawn = None
         self.patrol_index = 0
@@ -41,7 +42,8 @@ class PathFinder:
             if PhysicsUtils.calc_distance(spawn_pos, info['pos']) <= range_px:
                 return True
         return False
-
+    
+    @trace_logic
     def find_next_patrol_target(self, current_pos):
         """
         설치기가 커버하지 못하는 구역 중 가장 효율적인 다음 목표물을 선정합니다.
@@ -72,11 +74,55 @@ class PathFinder:
             )
             
         return (target['x'], target['y'])
+    
+    def _can_reach_with_jump(self, start_pos, target_pos):
+        """물리 엔진을 사용하여 일반 점프로 목표 지점에 도달 가능한지 예측"""
+        if not self.physics_engine or not self.physics_engine.is_loaded:
+            return False
+
+        cx, cy = start_pos
+        tx, ty = target_pos
+        
+        # [설정] 모델 학습 시 사용한 '점프' 행동의 ID (예: 2번이 점프라고 가정)
+        # 사용자의 모델에 맞는 ID로 변경 필요 (기존 rune_solver.py 참고)
+        JUMP_ACTION_ID = 2 
+        
+        # 1. 물리 엔진에게 "점프하면 초기 속도가 얼마야?"라고 물어봄
+        pred = self.physics_engine.predict_velocity(action_idx=JUMP_ACTION_ID, is_ground=1.0)
+        if not pred:
+            return False
+            
+        vx, vy = pred[0] # 예측된 초기 속도 (vx, vy)
+        gravity = pred[1] # 예측된 중력
+        
+        # 2. 궤적 시뮬레이션 (약 1초/60프레임 동안의 움직임 계산)
+        sim_x, sim_y = cx, cy
+        
+        for _ in range(60): 
+            # 위치 업데이트
+            sim_x += vx
+            sim_y += vy
+            
+            # 속도 업데이트 (중력 적용)
+            vy += gravity
+            
+            # 3. 판정 로직
+            # 목표 높이(ty)보다 더 높이 올라갔는지 확인 (화면 좌표계는 위쪽이 y가 작음)
+            if sim_y <= ty: 
+                # 높이가 충분하다면, 수평 거리도 닿는지 확인 (오차 범위 20px)
+                if abs(sim_x - tx) < 30: 
+                    return True
+                    
+            # 바닥보다 아래로 떨어지면 시뮬레이션 종료
+            if sim_y > cy + 10: 
+                break
+                
+        return False
 
     def get_move_command(self, current_pos):
         """
         현재 위치에서 목표 지점까지 가기 위한 추상화된 커맨드를 반환합니다.
-       
+        (물리 엔진 예측 적용됨)
         """
         tx, ty = self.find_next_patrol_target(current_pos)
         cx, cy = current_pos
@@ -87,11 +133,21 @@ class PathFinder:
         # 1. Y축 이동 판단 (복층 구조 대응)
         if abs(dy) > 10:  # 층 차이가 날 경우
             if dy > 0:
+                # 목표가 아래에 있음 -> 하향 점프
                 return "down_jump", "Target is below current platform"
             else:
-                return "up_jump", "Target is above current platform"
+                # 목표가 위에 있음 (dy < 0)
+                
+                # [추가] 물리 엔진으로 일반 점프 도달 가능성 확인
+                if self._can_reach_with_jump(current_pos, (tx, ty)):
+                    # 로프(up_jump) 대신 그냥 점프하면서 이동
+                    if dx > 0: return "right_jump", "Physics: Standard jump reachable"
+                    else: return "left_jump", "Physics: Standard jump reachable"
+                
+                # 도달 불가능하면 로프/사다리 스킬 사용
+                return "up_jump", "Target is too high (Need Rope)"
         
-        # 2. X축 이동 판단
+        # 2. X축 이동 판단 (기존 로직 유지)
         if abs(dx) > 5:
             if dx > 0:
                 return "move_right", f"Target X({tx}) is right of Current X({cx})"

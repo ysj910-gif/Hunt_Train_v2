@@ -7,7 +7,7 @@ import ctypes
 from ctypes import wintypes
 import pygetwindow as gw
 import time
-from utils.logger import logger
+from utils.logger import logger, trace_logic
 
 # DPI 인식 설정 (좌표 밀림 방지)
 try:
@@ -29,7 +29,7 @@ class VisionSystem:
         self.capture_area = {"top": 0, "left": 0, "width": 1366, "height": 768}
         self.window_found = False
         self.hwnd = None
-        self.sct = mss.mss() # MSS 인스턴스 유지
+        # self.sct = mss.mss()  <-- [삭제] 여기서 생성하면 스레드 충돌 발생
         
         # [신규] ROI 관리 변수
         self.minimap_roi = None  # (x, y, w, h)
@@ -106,14 +106,16 @@ class VisionSystem:
                 return None
 
         try:
-            # mss.grab은 모니터 범위를 벗어나면 에러 발생 가능
-            img_buffer = self.sct.grab(self.capture_area)
-            img_np = np.array(img_buffer)
-            frame = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
-            return frame
+            # [수정] mss를 캡처 시점에 with문으로 생성하여 스레드 안전성 확보
+            with mss.mss() as sct:
+                # mss.grab은 모니터 범위를 벗어나면 에러 발생 가능
+                img_buffer = sct.grab(self.capture_area)
+                img_np = np.array(img_buffer)
+                frame = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
+                return frame
 
         except Exception as e:
-            logger.exception("화면 캡처 실패")
+            # logger.exception("화면 캡처 실패") # 너무 자주 뜨면 로그 파일 커지므로 주석 처리 권장
             self.window_found = False # 다음 루프 재탐색 유도
             return None
             
@@ -134,12 +136,6 @@ class VisionSystem:
     def set_skill_roi(self, name, rect, frame=None, threshold=None):
         """
         스킬 아이콘 ROI 및 쿨타임 임계값 설정
-        
-        Args:
-            name (str): 스킬 이름
-            rect (tuple): (x, y, w, h) 영역
-            frame (np.array): 현재 화면 이미지 (Threshold 자동 계산용)
-            threshold (float): 직접 지정할 임계값 (없으면 frame 분석)
         """
         # Threshold 자동 계산: 현재 활성화된 상태라고 가정하고 밝기의 70%를 기준으로 잡음
         if threshold is None and frame is not None:
@@ -166,9 +162,6 @@ class VisionSystem:
     def check_skill_cooldown(self, frame):
         """
         등록된 모든 스킬 아이콘을 분석하여 쿨타임 여부를 반환합니다.
-        
-        Returns:
-            dict: {skill_name: is_cooldown(bool)}
         """
         status = {}
         self.skill_debug_info = {} # UI 표시용 초기화
@@ -216,8 +209,6 @@ class VisionSystem:
     def capture_and_analyze(self):
         """
         [GUI 호환용] 캡처 후 기본적인 분석 정보를 반환
-        Returns: frame, entropy(0), kill_count(0), px(0), py(0)
-        (실제 분석 로직은 Scanner 등 다른 모듈에서 수행하므로 여기선 기본값 반환)
         """
         frame = self.capture()
         if frame is None:
@@ -225,3 +216,31 @@ class VisionSystem:
         
         # 호환성을 위해 GUI에서 사용하는 형태로 반환
         return frame, 0, 0, 0, 0
+    
+    @trace_logic
+    def activate_window(self):
+        """게임 창을 맨 앞으로 가져오고 포커스를 줍니다."""
+        if not self.hwnd:
+            return False
+            
+        try:
+            # 현재 활성화된 창이 이미 메이플이면 패스
+            foreground_hwnd = user32.GetForegroundWindow()
+            if foreground_hwnd == self.hwnd:
+                return True
+
+            # 최소화 상태면 복구
+            if user32.IsIconic(self.hwnd):
+                user32.ShowWindow(self.hwnd, 9) # SW_RESTORE
+            
+            # 강제 포커스 (Alt key trick to bypass Windows restriction)
+            # 윈도우는 다른 프로그램이 포커스를 뺏어가는 것을 막는 경우가 있어, Alt키를 누르는 척 하면서 전환
+            user32.keybd_event(0, 0, 0, 0)
+            user32.SetForegroundWindow(self.hwnd)
+            
+            logger.debug("게임 창 활성화 시도...")
+            time.sleep(0.2) # 전환 대기 시간
+            return True
+        except Exception as e:
+            logger.error(f"창 활성화 실패: {e}")
+            return False
