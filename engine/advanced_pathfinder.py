@@ -3,7 +3,7 @@
 import heapq
 import math
 import time
-from utils.logger import logger
+from utils.logger import logger, trace_logic
 
 class PathNode:
     def __init__(self, x, y, platform_id, g=0, h=0, parent=None, action=None):
@@ -50,14 +50,14 @@ class AStarPathFinder:
             if math.hypot(curr.x - target_pos[0], curr.y - target_pos[1]) < self.GOAL_TOLERANCE:
                 return self._reconstruct_path(curr)
 
-            state_key = (curr.platform_id, int(curr.x // 20))
+            state_key = (curr.platform_id, int(curr.x // 10)) # 그리드 크기 20 -> 10으로 정밀화
             if state_key in closed_set:
                 continue
             closed_set.add(state_key)
 
             # 가능한 행동 시뮬레이션
-            # (행동명, 예상 소요 프레임)
             actions = ["move_left", "move_right", "jump", "up_jump", "down_jump"]
+            
             if curr.platform_id != -1: # 땅에 있을 때만 점프 가능
                  pass
             else:
@@ -65,9 +65,9 @@ class AStarPathFinder:
                  continue
 
             for action in actions:
-                # 가지치기: 목표 방향과 반대되는 이동은 후순위 (혹은 스킵)
-                if "left" in action and curr.x < target_pos[0] - 50: continue
-                if "right" in action and curr.x > target_pos[0] + 50: continue
+                # [수정] 가지치기 범위 축소 (미니맵 스케일에 맞춰 50 -> 10으로 변경)
+                if "left" in action and curr.x < target_pos[0] - 10: continue
+                if "right" in action and curr.x > target_pos[0] + 10: continue
 
                 next_state = self._simulate_action(curr, action)
                 if next_state:
@@ -84,23 +84,22 @@ class AStarPathFinder:
         return math.hypot(target[0] - pos[0], target[1] - pos[1]) / 10.0 # 거리 비용 가중치 조절
 
     def _simulate_action(self, node, action):
-        """물리 엔진을 이용해 행동 결과 예측"""
-        # 1. 초기 속도 설정 (PhysicsEngine이 있으면 사용, 없으면 하드코딩)
-        vx, vy = 0, 0
-        gravity = 5.0
+        """물리 엔진을 이용해 행동 결과 예측 (미니맵 스케일 적용)"""
         
-        if self.physics_engine and self.physics_engine.is_loaded:
-            # 행동 ID 매핑 필요 (임시 ID 사용)
-            act_id = self._get_action_id(action)
-            (p_vx, p_vy), p_g = self.physics_engine.predict_velocity(act_id, 1.0)
-            vx, vy, gravity = p_vx, p_vy, p_g
-        else:
-            # Fallback 물리값
-            if "jump" in action: vy = -65.0
-            if "up_jump" in action: vy = -140.0
-            if "move_left" in action: vx = -18.0
-            if "move_right" in action: vx = 18.0
-            if "down_jump" in action: vy = -10.0 # 살짝 뜸
+        # [핵심 수정] 스케일 조정: 미니맵이 실제 화면의 약 12% 크기라고 가정
+        SCALE = 0.12  
+
+        # 1. 초기 속도 설정 (미니맵 크기에 맞춰 스케일 다운)
+        vx, vy = 0, 0
+        gravity = 5.0 * SCALE # 중력 보정
+
+        # AI 모델 대신 하드코딩된 물리값 사용 (안전성 확보 및 스케일 적용)
+        # Fallback 물리값에 SCALE 적용
+        if "jump" in action: vy = -65.0 * SCALE
+        if "up_jump" in action: vy = -140.0 * SCALE
+        if "move_left" in action: vx = -18.0 * SCALE
+        if "move_right" in action: vx = 18.0 * SCALE
+        if "down_jump" in action: vy = -10.0 * SCALE
 
         # 2. 궤적 시뮬레이션
         sim_x, sim_y = node.x, node.y
@@ -114,18 +113,19 @@ class AStarPathFinder:
             landed = self.map_processor.find_current_platform(sim_x, sim_y)
             if landed:
                 # 하향 점프인 경우 현재 발판은 무시해야 함
-                if "down_jump" in action and landed['y'] <= node.y + 10:
+                # [수정] 착지 허용 오차도 스케일에 맞춰 축소 (+10 -> +2)
+                if "down_jump" in action and landed['y'] <= node.y + 2:
                     continue
                     
                 plat_id = self.map_processor.platforms.index(landed)
                 return (sim_x, landed['y'], plat_id, t)
             
-            # 맵 이탈 체크 (Y축)
-            if sim_y > 2000: break 
+            # [수정] 맵 이탈 체크 (Y축) - 미니맵 높이(약 84)를 고려하여 200 정도로 제한
+            if sim_y > 200: break 
 
         # 단순히 걷기의 경우 발판 끝까지 갔는지 체크 (Move action)
         if "move" in action and not landed:
-             # 시뮬레이션 끝났는데 바닥이 없으면(절벽) -> 떨어지는 경로도 노드로 추가 가능하나 일단 제외
+             # 절벽인 경우 떨어지는 로직을 추가할 수 있으나, 안전하게 None 반환
              return None
 
         return None

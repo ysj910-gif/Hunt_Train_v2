@@ -102,6 +102,8 @@ class BotAgent:
         # 키 매핑 저장소 (UI에서 주입됨)
         self.key_mapping = {}
 
+        self.neural_controller = NeuralController()
+
         logger.info(f"BotAgent Initialized ({mode} Mode).")
 
     def load_map(self, file_path: str) -> bool:
@@ -371,6 +373,58 @@ class BotAgent:
     def _handle_combat(self):
         if not self.player_pos: return
 
+    # 1. 현재 상태 딕셔너리 생성 (Feature 이름은 train_movement.py와 일치해야 함)
+        state_dict = {
+            'player_x': self.player_pos[0],
+            'player_y': self.player_pos[1],
+            'delta_x': 0, # 스캐너에서 이전 위치와 비교하여 계산 필요
+            'delta_y': 0,
+            # 시야 정보 등... (GameScanner에서 가져와야 함)
+            'kill_count': self.scanner.current_kill_count,
+            'ult_ready': 1 if not self.scanner.is_cooldown('ultimate') else 0
+        }
+
+        # 2. 신경망 추론
+        if self.neural_controller.loaded:
+            keys_to_press = self.neural_controller.predict(state_dict, threshold=0.4)
+            
+            # 로그 출력
+            if keys_to_press:
+                logger.debug(f"[AI Control] Pressing: {keys_to_press}")
+                
+            # 3. 키 입력 실행 (각 키를 개별적으로 처리)
+            # 예: ['left', 'jump']가 나오면 왼쪽 누른 상태로 점프
+            
+            # 방향키 처리
+            if 'left' in keys_to_press:
+                self.action_handler.key_down('left')
+            else:
+                self.action_handler.key_up('left')
+                
+            if 'right' in keys_to_press:
+                self.action_handler.key_down('right')
+            else:
+                self.action_handler.key_up('right')
+                
+            # 점프
+            if 'jump' in keys_to_press:
+                self.action_handler.press('jump')
+                
+            # 스킬/공격
+            if 'attack' in keys_to_press:
+                self.action_handler.press('ctrl') # 메인 공격 키
+                
+            # 윗점프 등 특수키 조합 (AI가 up과 jump를 같이 냈다면)
+            if 'up' in keys_to_press:
+                self.action_handler.key_down('up')
+            else:
+                self.action_handler.key_up('up')
+
+        else:
+            # 모델 로드 실패 시 기존 룰 베이스 로직 사용 (Fallback)
+            install_ready = not self.scanner.is_cooldown("fountain") 
+            command, target = self.path_finder.get_next_combat_step(self.player_pos, install_ready)
+
         # 1. 설치기 쿨타임 확인 (config나 scanner에서 가져옴)
         # 예: 'fountain' 스킬이 사용 가능한지
         install_ready = not self.scanner.is_cooldown("fountain") 
@@ -405,7 +459,7 @@ class BotAgent:
         elif command == "attack_on_spot":
             # 제자리 공격 (또는 광역기)
             self.action_handler.jump_shot(None) # 제자리 점프샷
-            
+
     def _handle_emergency(self):
         """에러 복구"""
         self.last_action = "Recovering"
