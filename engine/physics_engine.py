@@ -32,9 +32,11 @@ class PhysicsEngine:
                 self.model.load_state_dict(state_dict, strict=False)
                 
             else:
-                # 신버전 모델 감지
                 if 'velocity.weight' in state_dict:
+                    # 신버전(Hybrid) 모델 감지
                     num_actions = state_dict['velocity.weight'].shape[0]
+                    self.model = HybridPhysicsNet(num_actions=num_actions).to(self.device)
+                    self.model.load_state_dict(state_dict)
                 else:
                     num_actions = 16
                 logger.info(f"신버전 물리 모델 감지 (Actions: {num_actions})")

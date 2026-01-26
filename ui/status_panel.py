@@ -253,7 +253,6 @@ class StatusPanel:
         else:
             self.log_text.see("end")
 
-    # [중요] 이 메서드가 누락되어 오류가 났었습니다. 반드시 포함되어야 합니다.
     def highlight_recent_logs(self):
         self.log_text.config(state="normal")
         self.log_text.tag_remove("highlight", "1.0", "end")

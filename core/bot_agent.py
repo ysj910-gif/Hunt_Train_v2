@@ -369,69 +369,43 @@ class BotAgent:
 
     @trace_logic
     def _handle_combat(self):
-        """전투 로직 (키 매핑 적용 수정)"""
+        if not self.player_pos: return
 
-        if int(time.time()) % 10 == 0:
-            self.vision.activate_window()
-        
-        if not self.player_pos:
-            return
+        # 1. 설치기 쿨타임 확인 (config나 scanner에서 가져옴)
+        # 예: 'fountain' 스킬이 사용 가능한지
+        install_ready = not self.scanner.is_cooldown("fountain") 
 
-        action_plan = None
-        skill_key = None 
+        # 2. PathFinder에게 다음 할 일 물어보기
+        command, target = self.path_finder.get_next_combat_step(self.player_pos, install_ready)
 
-        # 1. 스킬 전략 모듈에게 어떤 '스킬 이름'을 쓸지 물어봄
-        if self.skill_strategy:
-             action_plan = self.skill_strategy.decide_skill(self.player_pos, self.scanner.skill_status)
+        self.last_action = command # UI 표시용
 
-        # 키 매핑 조회 로직
-        jump_key = 'alt'
-        attack_key = 'ctrl'
-        
-        if hasattr(self, 'key_mapping'):
-            if action_plan and action_plan in self.key_mapping:
-                skill_key = self.key_mapping[action_plan]
+        # 3. 명령 수행
+        if command == "move_to_install":
+            # 설치 위치로 이동 (공격 없이 빠르게 이동)
+            self.action_handler.move_x(target[0], lambda: self.scanner.find_player(self.vision.capture()))
             
-            if 'jump' in self.key_mapping: jump_key = self.key_mapping['jump']
-            if 'attack' in self.key_mapping: attack_key = self.key_mapping['attack']
+        elif command == "install_skill":
+            # 설치기 사용
+            self.action_handler.press(self.key_mapping.get("fountain", "4"))
+            # 설치했다고 PathFinder에 알림 (쿨타임 관리용)
+            self.path_finder.update_install_status("fountain", *self.player_pos, 60) 
 
-        if not action_plan:
-            action_plan = "basic_attack"
-
-        # 상태 업데이트 (UI 표시용)
-        self.last_action = action_plan
-        self.last_action_desc = "Combat Routine"
-
-        # 3. Action 실행
-        if action_plan == "basic_attack":
-             # TODO: 몬스터 위치 기반 방향 결정 로직 (scanner에서 몬스터 정보를 가져온다고 가정)
-             # 예: monsters = self.scanner.get_monsters() ...
-             
-             direction = 'left' # 현재는 하드코딩 되어 있음
-             decision_reason = "Default direction (No monster logic)" # 이유 설명
-
-             # [추가] 여기에 의사결정 로그를 남깁니다.
-             logger.log_decision(
-                 step="BotAgent",
-                 state="COMBAT",
-                 decision=f"JumpShot_{direction.upper()}",
-                 reason=decision_reason,
-                 details={"skill": "Basic Attack", "keys": f"{jump_key}+{attack_key}"}
-             )
-
-             # [수정] 찾아낸 점프/공격 키를 사용하여 점프샷
-             self.action_handler.jump_shot(direction, jump_key=jump_key, attack_key=attack_key)
-        else:
-            # 스킬 사용의 경우 SkillStrategy 내부에서 이미 로그를 남기지만,
-            # 실행 시점에도 기록하고 싶다면 아래 주석을 해제하세요.
-            # logger.log_decision("BotAgent", "COMBAT", f"Cast_{action_plan}", "Skill Strategy Executed")
+        elif command == "move_and_attack":
+            # 목표로 이동하면서 점프샷
+            tx = target[0]
+            cx = self.player_pos[0]
+            direction = 'right' if tx > cx else 'left'
             
-            # 결정된 스킬 키가 있으면 누름
-            if skill_key:
-                self.action_handler.press(skill_key)
-            else:
-                logger.warning(f"스킬 [{action_plan}]에 매핑된 키를 찾을 수 없습니다.")
-
+            # [수정된 부분] 이동하면서 공격 (스킬 난사)
+            self.action_handler.jump_shot(direction, 
+                                          jump_key=self.key_mapping.get('jump', 'alt'),
+                                          attack_key=self.key_mapping.get('main', 'ctrl'))
+            
+        elif command == "attack_on_spot":
+            # 제자리 공격 (또는 광역기)
+            self.action_handler.jump_shot(None) # 제자리 점프샷
+            
     def _handle_emergency(self):
         """에러 복구"""
         self.last_action = "Recovering"
