@@ -478,6 +478,8 @@ class BotAgent:
             self.player_pos = self.scanner.find_player(self.current_frame)
             self.scanner.update_skill_status(self.current_frame)
 
+            self.scanner.read_kill_count(self.current_frame)
+
     def set_map_offset(self, x: int, y: int):
         self.map_processor.set_offset(x, y)
 
