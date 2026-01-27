@@ -156,16 +156,31 @@ class MainWindow:
 
         if self.is_simulating and self.sim_mode:
             # [시뮬레이션 모드]
-            # 물리 연산 및 화면 갱신 수행
             self.sim_mode.update()
             
         else:
             # [기존 게임 모드]
             debug_info = self.agent.get_debug_info()
 
-            # [수정] 아래의 모든 로직을 else 블록 안으로 이동(들여쓰기)했습니다.
-            # debug_info가 정의된 상태에서만 실행되도록 변경
-            
+            # -----------------------------------------------------------------
+            # [★신규] 맵 제작 도구(MapCreator)의 데이터를 시각화 정보에 주입
+            # -----------------------------------------------------------------
+            if self.map_tab and hasattr(self.map_tab, 'map_creator'):
+                creator = self.map_tab.map_creator
+                
+                # 시각화에 필요한 제작 도구 상태를 딕셔너리로 묶음
+                creator_data = {
+                    "new_platforms": creator.new_platforms,
+                    "new_portals": getattr(creator, 'new_portals', []),
+                    "new_ropes": getattr(creator, 'new_ropes', []),
+                    "new_map_portals": getattr(creator, 'new_map_portals', []),
+                    "temp_start": creator.temp_start_pos,
+                    "temp_end": creator.temp_end_pos
+                }
+                # debug_info에 'creator_data' 키로 추가
+                debug_info['creator_data'] = creator_data
+            # -----------------------------------------------------------------
+
             # [신규] 창 제목에 FPS 실시간 표시
             current_fps = debug_info.get("fps", 0.0)
             self.root.title(f"MapleHunter v2.0 - [FPS: {current_fps:.1f}]")
@@ -178,29 +193,25 @@ class MainWindow:
             ox = self.map_tab.map_offset_x
             oy = self.map_tab.map_offset_y
             
-            # 원본 OpenCV 이미지 생성
+            # 원본 OpenCV 이미지 생성 (수정된 Visualizer 호출)
             cv_img = Visualizer.draw_debug_view(debug_info, ox, oy)
             
             if cv_img is not None:
-                # ★ 캔버스의 현재 크기 가져오기
                 w = self.canvas.winfo_width()
                 h = self.canvas.winfo_height()
                 
-                # 창이 초기화되어 크기가 1보다 클 때만 그리기 수행
                 if w > 1 and h > 1:
-                    # 캔버스 크기에 맞춰 비율 유지하며 리사이징된 Tk 이미지 변환
                     target_w = int(w * self.view_scale)
                     target_h = int(h * self.view_scale)
                     
                     tk_img = Visualizer.convert_to_tk_image(cv_img, target_w=target_w, target_h=target_h)
                     
                     if tk_img:
-                        # 캔버스 중앙에 배치
                         self.canvas.create_image(w//2, h//2, image=tk_img, anchor="center")
                         self.canvas.image = tk_img
 
         self.root.after(30, self.update_ui_loop)
-
+        
     def find_window_action(self):
         if self.agent.vision.find_window():
             messagebox.showinfo("성공", "창을 찾았습니다.")

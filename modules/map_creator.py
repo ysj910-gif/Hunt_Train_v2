@@ -14,6 +14,12 @@ class MapCreator:
     def __init__(self, agent=None):
         self.agent = agent
         self.new_platforms = []
+        self.new_portals = []   # 신규: 포탈 리스트
+        self.new_ropes = []     # 신규: 밧줄 리스트
+        self.new_map_portals = []  # [신규] 맵 이동 포탈 저장소
+        
+        # [실행 취소 스택] (타입, 객체) 튜플을 저장하여 순서대로 취소
+        self.action_history = []
         self.temp_start_pos = None
         self.temp_end_pos = None
         
@@ -106,15 +112,134 @@ class MapCreator:
     
     def get_platform_count(self):
         return len(self.new_platforms)
+    
+    # MapCreator 클래스 내부에 추가
+    def is_ready_to_add(self):
+        """발판을 추가할 준비가 되었는지(시작점/종료점 설정 여부) 확인"""
+        return self.temp_start_pos is not None and self.temp_end_pos is not None
 
+    def _reset_temp_pos(self):
+        """좌표 초기화 공통 함수"""
+        self.temp_start_pos = None
+        self.temp_end_pos = None
+        self.clear_manual_pos()
+
+    def add_platform(self):
+        if not self.is_ready_to_add():
+            return False, "시작점과 종료점이 설정되지 않았습니다."
+
+        x1, y1 = self.temp_start_pos
+        x2, y2 = self.temp_end_pos
+
+        new_plat = {
+            "x_start": min(x1, x2),
+            "x_end": max(x1, x2),
+            "y": int((y1 + y2) / 2)
+        }
+        
+        self.new_platforms.append(new_plat)
+        self.action_history.append(("platform", new_plat)) # 히스토리 기록
+        self._reset_temp_pos()
+        
+        logger.info(f"[MapCreator] Platform Added: {new_plat}")
+        return True, new_plat
+
+    def add_portal(self):
+        """[신규] 포탈 추가"""
+        if not self.is_ready_to_add():
+            return False, "시작점과 종료점이 설정되지 않았습니다."
+
+        # 포탈은 시작점(src)에서 끝점(dst)으로 이동하는 연결 정보
+        new_portal = {
+            "src": self.temp_start_pos,
+            "dst": self.temp_end_pos
+        }
+
+        self.new_portals.append(new_portal)
+        self.action_history.append(("portal", new_portal))
+        self._reset_temp_pos()
+
+        logger.info(f"[MapCreator] Portal Added: {new_portal}")
+        return True, new_portal
+
+    def add_rope(self):
+        """[신규] 밧줄 추가"""
+        if not self.is_ready_to_add():
+            return False, "시작점과 종료점이 설정되지 않았습니다."
+
+        x1, y1 = self.temp_start_pos
+        x2, y2 = self.temp_end_pos
+
+        # 밧줄은 수직 구조물이므로 X는 평균값, Y는 위/아래 범위로 설정
+        new_rope = {
+            "x": int((x1 + x2) / 2),
+            "y_top": min(y1, y2),
+            "y_bottom": max(y1, y2)
+        }
+
+        self.new_ropes.append(new_rope)
+        self.action_history.append(("rope", new_rope))
+        self._reset_temp_pos()
+
+        logger.info(f"[MapCreator] Rope Added: {new_rope}")
+        return True, new_rope
+    
+    def add_map_portal(self, target_map_name):
+        """[신규] 맵 이동 포탈 추가 (Start Point 위치 사용)"""
+        if self.temp_start_pos is None:
+            return False, "포탈 위치(시작점)가 설정되지 않았습니다."
+
+        x, y = self.temp_start_pos
+        
+        # 맵 포탈 데이터 구조
+        portal_data = {
+            "x": x,
+            "y": y,
+            "to_map": target_map_name
+        }
+
+        self.new_map_portals.append(portal_data)
+        self.action_history.append(("map_portal", portal_data))
+        self._reset_temp_pos() # 위치 초기화
+
+        logger.info(f"[MapCreator] Map Portal Added: {portal_data}")
+        return True, portal_data
+
+    def undo_last_action(self):
+        """[수정] 실행 취소 로직에 map_portal 추가"""
+        if not self.action_history:
+            return False, "취소할 작업이 없습니다."
+
+        action_type, item = self.action_history.pop()
+
+        if action_type == "platform":
+            if item in self.new_platforms: self.new_platforms.remove(item)
+        elif action_type == "portal":
+            if item in self.new_portals: self.new_portals.remove(item)
+        elif action_type == "rope":
+            if item in self.new_ropes: self.new_ropes.remove(item)
+        elif action_type == "map_portal": # [신규]
+            if item in self.new_map_portals: self.new_map_portals.remove(item)
+            
+        logger.info(f"[MapCreator] Undo {action_type}: {item}")
+        return True, f"{action_type} 취소됨"
+
+    def get_summary(self):
+        """[수정] 요약 정보 갱신"""
+        return (f"Plat: {len(self.new_platforms)} | Portal: {len(self.new_portals)} | "
+                f"Rope: {len(self.new_ropes)} | MapP: {len(self.new_map_portals)}")
+    
     def save_map_to_json(self, file_path):
-        if not self.new_platforms:
+        # [수정] 데이터 유무 체크
+        if not (self.new_platforms or self.new_portals or self.new_ropes or self.new_map_portals):
             return False, "저장할 데이터가 없습니다."
 
         map_data = {
             "platforms": self.new_platforms,
-            "spawns": [], 
-            "portals": []
+            "portals": self.new_portals,
+            "ropes": self.new_ropes,
+            "map_portals": self.new_map_portals, # [신규] JSON 키 추가
+            "spawns": []
         }
         
         try:
@@ -125,9 +250,14 @@ class MapCreator:
         except Exception as e:
             logger.error(f"[MapCreator] Save Error: {e}")
             return False, str(e)
+    
             
     def clear_data(self):
         self.new_platforms = []
-        self.temp_start_pos = None
-        self.temp_end_pos = None
-        self._manual_pos = None
+        self.new_portals = []
+        self.new_ropes = []
+        self.new_map_portals = [] # [신규] 초기화
+        self.action_history = []
+        self._reset_temp_pos()
+
+    

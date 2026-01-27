@@ -1,6 +1,6 @@
 # ui/tabs/map_tab.py
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog # [수정] simpledialog 추가
 import os
 from modules.map_creator import MapCreator  # [신규] 분리된 로직 모듈 임포트
 
@@ -8,6 +8,8 @@ class MapTab:
     def __init__(self, notebook, agent, save_callback=None):
         self.agent = agent
         self.save_callback = save_callback  # 콜백 저장
+
+        self.map_creator = MapCreator(self.agent)
         
         self.frame = ttk.Frame(notebook)
         notebook.add(self.frame, text="Map & AI Model")
@@ -80,32 +82,44 @@ class MapTab:
         self.lbl_end_pos = ttk.Label(info_grid, text="Not Set", foreground="red")
         self.lbl_end_pos.grid(row=1, column=1, sticky="w", padx=5)
 
-        # 조작 버튼
-        btn_grid = ttk.Frame(creator_frame)
-        btn_grid.pack(fill="x", padx=5, pady=5)
+        # 3. [수정] 객체 추가 버튼 영역 (그리드로 변경하여 배치)
+        add_frame = ttk.LabelFrame(creator_frame, text="Add Objects")
+        add_frame.pack(fill="x", padx=5, pady=5)
         
-        ttk.Button(btn_grid, text="1. Set Start", command=self.on_set_start).pack(side="left", expand=True, fill="x", padx=1)
-        ttk.Button(btn_grid, text="2. Set End", command=self.on_set_end).pack(side="left", expand=True, fill="x", padx=1)
+        # Row 0: 기본 구조물
+        ttk.Button(add_frame, text="🧱 Platform", command=self.on_add_platform).grid(row=0, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(add_frame, text="🪢 Rope", command=self.on_add_rope).grid(row=0, column=1, sticky="ew", padx=2, pady=2)
         
-        ttk.Button(creator_frame, text="3. ➕ Add Platform", command=self.on_add_platform).pack(fill="x", padx=5, pady=2)
+        # Row 1: 포탈류
+        ttk.Button(add_frame, text="🌀 Local Portal", command=self.on_add_portal).grid(row=1, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(add_frame, text="🚪 Map Portal (Next Map)", command=self.on_add_map_portal).grid(row=1, column=1, sticky="ew", padx=2, pady=2) # [신규]
         
-        # 상태 표시
-        self.lbl_platform_count = ttk.Label(creator_frame, text="Platforms: 0", font=("Arial", 9, "bold"))
-        self.lbl_platform_count.pack(pady=2)
+        # 그리드 비율 조정
+        add_frame.columnconfigure(0, weight=1)
+        add_frame.columnconfigure(1, weight=1)
 
+        # 4. [신규] 실행 취소 버튼
+        ttk.Button(creator_frame, text="↩️ Undo Last Action", command=self.on_undo).pack(fill="x", padx=5, pady=2)
+
+        # 5. [수정] 상태 표시 (종합 정보)
+        self.lbl_status = ttk.Label(creator_frame, text="Ready", font=("Arial", 9))
+        self.lbl_status.pack(pady=2)
+        
         # 저장 버튼
         ttk.Separator(creator_frame, orient='horizontal').pack(fill='x', pady=5)
         ttk.Button(creator_frame, text="💾 Save New Map JSON", command=self.on_save_map).pack(fill="x", padx=5, pady=5)
 
     # --- Event Handlers (UI Logic) ---
 
+    # --- Event Handlers (UI Logic) ---
+
     def refresh_pos_info(self):
-        """현재 좌표 UI 갱신"""
+        """현재 좌표 UI 갱신 (유지)"""
         pos = self.map_creator.get_current_pos()
         self.lbl_current_pos.config(text=f"Last Known Pos: {pos}")
 
     def on_set_start(self):
-        """시작점 설정 버튼 핸들러"""
+        """시작점 설정 버튼 핸들러 (유지)"""
         success, pos = self.map_creator.set_start_point()
         self.refresh_pos_info()
         
@@ -115,7 +129,7 @@ class MapTab:
             messagebox.showwarning("Warning", "플레이어 위치를 인식할 수 없습니다.\n미니맵에 노란 점이 보이는지 확인하세요.")
 
     def on_set_end(self):
-        """종료점 설정 버튼 핸들러"""
+        """종료점 설정 버튼 핸들러 (유지)"""
         success, pos = self.map_creator.set_end_point()
         self.refresh_pos_info()
         
@@ -124,28 +138,90 @@ class MapTab:
         else:
             messagebox.showwarning("Warning", "플레이어 위치를 인식할 수 없습니다.\n미니맵에 노란 점이 보이는지 확인하세요.")
 
+    # [신규] 공통 UI 업데이트 헬퍼 메서드
+    def _update_status_ui(self):
+        """작업 후 UI 상태(라벨 등)를 일괄 갱신합니다."""
+        # 1. 시작/종료점 라벨 초기화
+        self.lbl_start_pos.config(text="Not Set", foreground="red")
+        self.lbl_end_pos.config(text="Not Set", foreground="red")
+        
+        # 2. 종합 상태 표시 (MapCreator.get_summary 활용)
+        if hasattr(self, 'lbl_status'): # lbl_status가 없는 경우 lbl_platform_count 사용
+            summary = self.map_creator.get_summary()
+            self.lbl_status.config(text=summary, foreground="blue")
+        else:
+            # 기존 라벨 호환성
+            count = self.map_creator.get_platform_count()
+            self.lbl_platform_count.config(text=f"Objects: {count}")
+
     def on_add_platform(self):
-        """발판 추가 버튼 핸들러"""
+        """발판 추가 버튼 핸들러 (수정됨)"""
         if not self.map_creator.is_ready_to_add():
             messagebox.showerror("Error", "시작점과 종료점을 모두 설정해야 합니다.")
             return
 
         success, new_plat = self.map_creator.add_platform()
         if success:
-            # UI 초기화
-            self.lbl_start_pos.config(text="Not Set", foreground="red")
-            self.lbl_end_pos.config(text="Not Set", foreground="red")
-            
-            count = self.map_creator.get_platform_count()
-            self.lbl_platform_count.config(text=f"Platforms: {count}")
+            self._update_status_ui()
             print(f"[MapTab] Platform Added: {new_plat}")
+        else:
+             messagebox.showwarning("Error", new_plat)
 
-    def on_save_map(self):
-        """저장 버튼 핸들러"""
-        if self.map_creator.get_platform_count() == 0:
-            messagebox.showwarning("Warning", "저장할 발판 데이터가 없습니다.")
+    def on_add_portal(self):
+        """[신규] 포탈 추가 버튼 핸들러"""
+        if not self.map_creator.is_ready_to_add():
+            messagebox.showerror("Error", "시작점과 종료점을 모두 설정해야 합니다.")
             return
 
+        success, res = self.map_creator.add_portal()
+        if success:
+            self._update_status_ui()
+            print(f"[MapTab] Portal Added: {res}")
+        else:
+            messagebox.showwarning("Error", res)
+
+    def on_add_rope(self):
+        """[신규] 밧줄 추가 버튼 핸들러"""
+        if not self.map_creator.is_ready_to_add():
+            messagebox.showerror("Error", "시작점과 종료점을 모두 설정해야 합니다.")
+            return
+
+        success, res = self.map_creator.add_rope()
+        if success:
+            self._update_status_ui()
+            print(f"[MapTab] Rope Added: {res}")
+        else:
+            messagebox.showwarning("Error", res)
+
+    def on_add_map_portal(self):
+        """[신규] 맵 이동 포탈 추가 핸들러"""
+        # 1. 위치 설정 확인 (시작점만 있으면 됨)
+        if self.map_creator.temp_start_pos is None:
+            messagebox.showwarning("Warning", "포탈 위치(Start Point)를 먼저 설정해주세요.")
+            return
+
+        # 2. 이동할 맵 이름 입력
+        target_name = simpledialog.askstring("Map Portal", "이동할 맵 이름을 입력하세요:\n(예: El Nath, Henesys)")
+        
+        if target_name:
+            success, res = self.map_creator.add_map_portal(target_name)
+            if success:
+                self._update_status_ui()
+                print(f"[MapTab] Map Portal Added: {res}")
+            else:
+                messagebox.showerror("Error", res)
+
+    def on_undo(self):
+        """[신규] 실행 취소 버튼 핸들러"""
+        success, msg = self.map_creator.undo_last_action()
+        if success:
+            self._update_status_ui()
+            messagebox.showinfo("Undo", msg)
+        else:
+            messagebox.showwarning("Undo", msg)
+
+    def on_save_map(self):
+        """저장 버튼 핸들러 (수정됨)"""
         file_path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON Files", "*.json")],
@@ -158,7 +234,7 @@ class MapTab:
                 messagebox.showinfo("Success", f"맵 파일이 저장되었습니다.\n{os.path.basename(file_path)}")
                 if messagebox.askyesno("Reset", "저장 후 작업 내역을 초기화하시겠습니까?"):
                     self.map_creator.clear_data()
-                    self.lbl_platform_count.config(text="Platforms: 0")
+                    self._update_status_ui() # UI 초기화
             else:
                 messagebox.showerror("Error", f"저장 실패: {msg}")
 
@@ -224,23 +300,21 @@ class MapTab:
     def update_info(self, map_path=None, lstm_path=None, rf_path=None):
         """외부에서 로드된 경로 정보를 받아 UI 라벨을 갱신합니다."""
         if map_path and os.path.exists(map_path):
-            # 맵 이름만 추출하여 표시 (예: "map_1.json")
             name = os.path.basename(map_path)
-            # self.lbl_map_name 등의 변수명은 사용하시는 코드에 맞게 확인 필요
-            # 만약 라벨 변수가 self.lbl_current_map 이라면:
-            if hasattr(self, 'lbl_map_name'):
-                self.lbl_map_name.config(text=f"현재 맵: {name}")
-            elif hasattr(self, 'lbl_cur_map'): # 변수명이 다를 경우 대비
-                self.lbl_cur_map.config(text=f"현재 맵: {name}")
-
+            # [수정] _setup_ui에서 생성한 변수명(self.lbl_map) 사용
+            if hasattr(self, 'lbl_map'):
+                self.lbl_map.config(text=f"현재 맵: {name}", foreground="green")
+        
+        # (LSTM 부분도 동일하게 self.lbl_lstm으로 통일 권장)
         if lstm_path and os.path.exists(lstm_path):
             name = os.path.basename(lstm_path)
-            if hasattr(self, 'lbl_lstm_name'):
-                self.lbl_lstm_name.config(text=f"AI 모델: {name}")
+            if hasattr(self, 'lbl_lstm'):
+                self.lbl_lstm.config(text=f"LSTM: {name}", foreground="blue")
 
+        # (Physics 부분도 self.lbl_physics로 통일 권장)
         if rf_path and os.path.exists(rf_path):
             name = os.path.basename(rf_path)
-            if hasattr(self, 'lbl_rf_name'):
-                self.lbl_rf_name.config(text=f"물리 모델: {name}")
+            if hasattr(self, 'lbl_physics'):
+                self.lbl_physics.config(text=f"Physics: {name}", foreground="blue")
                 
         print(f"UI 업데이트 완료: {map_path}, {lstm_path}")
