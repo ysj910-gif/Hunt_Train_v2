@@ -4,6 +4,7 @@ import time
 import threading
 import traceback
 import datetime
+import config 
 from typing import Tuple, Optional, Dict, Any, TYPE_CHECKING
 from utils.logger import logger
 
@@ -103,7 +104,7 @@ class BotAgent:
         if self.is_recording:
             self.toggle_recording() # 녹화 중지
         if self.thread:
-            self.thread.join(timeout=2.0)
+            self.thread.join(timeout=config.THREAD_TIMEOUT)
         logger.info("🛑 BotAgent Stopped.")
 
     def toggle_recording(self):
@@ -152,7 +153,8 @@ class BotAgent:
                 current_time = time.time()
                 delta = current_time - self.last_loop_time
                 if delta > 0:
-                    self.fps = self.fps * 0.9 + (1.0 / delta) * 0.1
+                    weight = config.FPS_SMOOTHING
+                    self.fps = self.fps * weight + (1.0 / delta) * (1.0 - weight)
                 self.last_loop_time = current_time
                 loop_start = time.time()
 
@@ -161,7 +163,7 @@ class BotAgent:
 
                 # 2. Safety Check
                 if not self.vision.window_found:
-                    if int(loop_start) % 5 == 0: 
+                    if int(loop_start) % config.WARNING_INTERVAL == 0: 
                         logger.warning("Game window lost...")
                     time.sleep(1.0)
                     continue
@@ -183,8 +185,8 @@ class BotAgent:
 
                 # Pace Control
                 elapsed = time.time() - loop_start
-                if elapsed < 0.05:
-                    time.sleep(0.05 - elapsed)
+                if elapsed < config.LOOP_INTERVAL:
+                    time.sleep(config.LOOP_INTERVAL - elapsed)
 
             except Exception as e:
                 logger.critical(f"Fatal Error in Agent Loop: {e}")

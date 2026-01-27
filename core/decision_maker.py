@@ -1,6 +1,7 @@
 # core/decision_maker.py
 
 import time
+import config 
 from enum import Enum, auto
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -113,7 +114,7 @@ class CombatState(BaseState):
 
     def _try_install_skill(self, agent) -> bool:
         """설치기가 필요하면 설치 로직 수행 후 True 반환"""
-        install_name = "fountain"
+        install_name = config.INSTALL_SKILL_NAME
         is_cooldown = agent.scanner.is_cooldown(install_name)
         installed_list = getattr(agent.path_finder, 'installed_objects', [])
         is_installed = any(obj['name'] == install_name for obj in installed_list)
@@ -161,11 +162,13 @@ class CombatState(BaseState):
         }
         
         # 예측 및 키 입력
-        keys_to_press = agent.brain.neural_controller.predict(state_dict, threshold=0.4)
-        
+        keys_to_press = agent.brain.neural_controller.predict(
+            state_dict, threshold=config.AI_CONFIDENCE_THRESHOLD
+        )
+
         if keys_to_press:
             # 구역 회피 로직 (설치기 근처 접근 금지)
-            check_dist = 50 
+            check_dist = config.SAFETY_DISTANCE 
             if 'left' in keys_to_press and agent.path_finder._is_point_covered(px - check_dist, py):
                 keys_to_press.remove('left')
             if 'right' in keys_to_press and agent.path_finder._is_point_covered(px + check_dist, py):
@@ -179,7 +182,7 @@ class CombatState(BaseState):
     def _apply_keys(self, agent, keys):
         handler = agent.action_handler
         mapping = agent.key_mapping
-        main_attack_key = mapping.get('main', 'r') 
+        main_attack_key = mapping.get('main', config.DEFAULT_KEYS['main'])
 
         if 'left' in keys: handler.key_down('left')
         else: handler.key_up('left')
@@ -187,7 +190,7 @@ class CombatState(BaseState):
         if 'right' in keys: handler.key_down('right')
         else: handler.key_up('right')
         
-        if 'jump' in keys: handler.press(mapping.get('jump', 'alt'))
+        if 'jump' in keys: handler.press(mapping.get('jump', config.DEFAULT_KEYS['jump']))
         if 'attack' in keys: handler.press(main_attack_key)
         
         if 'up' in keys: handler.key_down('up')
@@ -196,11 +199,12 @@ class CombatState(BaseState):
         if 'down' in keys: handler.key_down('down')
         else: handler.key_up('down')
         
-        if 'ultimate' in keys: handler.press(mapping.get('ultimate', '6'))
+        if 'ultimate' in keys: handler.press(mapping.get('ultimate', config.DEFAULT_KEYS['ultimate']))
 
     def _execute_rule_combat(self, agent):
         """Rule-based (PathFinder 위임) 전투 로직"""
-        install_ready = not agent.scanner.is_cooldown("fountain") 
+        install_sk = config.INSTALL_SKILL_NAME
+        install_ready = not agent.scanner.is_cooldown(install_sk) 
         command, target = agent.path_finder.get_next_combat_step(agent.player_pos, install_ready)
 
         agent.last_action = command 
@@ -208,17 +212,19 @@ class CombatState(BaseState):
         
         handler = agent.action_handler
         mapping = agent.key_mapping
-        jump_key = mapping.get('jump', 'alt')
-        attack_key = mapping.get('main', 'ctrl')
+        # [수정] 기본 키값 config에서 가져오기
+        jump_key = mapping.get('jump', config.DEFAULT_KEYS['jump'])
+        attack_key = mapping.get('main', config.DEFAULT_KEYS['main'])
+        install_key = mapping.get(install_sk, config.DEFAULT_KEYS['fountain'])
 
         if command == "execute_path":
             self._handle_path_action(handler, target, jump_key)
         elif command == "move_to_install":
             handler.move_x(target[0], lambda: agent.scanner.find_player(agent.vision.capture()))
         elif command == "install_skill":
-            handler.press(mapping.get("fountain", "4"))
-            agent.path_finder.update_install_status("fountain", *agent.player_pos) 
-            logger.info("✅ Fountain Installed!")
+            handler.press(install_key)
+            agent.path_finder.update_install_status(install_sk, *agent.player_pos) 
+            logger.info(f"✅ {install_sk} Installed!")
         elif command == "move_and_attack":
             direction = 'right' if target[0] > agent.player_pos[0] else 'left'
             handler.jump_shot(direction, jump_key=jump_key, attack_key=attack_key)
@@ -226,19 +232,20 @@ class CombatState(BaseState):
             handler.jump_shot(None, jump_key=jump_key, attack_key=attack_key)
 
     def _handle_path_action(self, handler, action, jump_key):
+        # [수정] 딜레이 시간들 config로 대체
         if action == "up_jump":
             handler.key_down("up"); time.sleep(0.05)
-            handler.press(jump_key, duration=0.15); time.sleep(0.05)
-            handler.key_up("up"); time.sleep(0.8)
+            handler.press(jump_key, duration=config.TIME_KEY_PRESS); time.sleep(0.05)
+            handler.key_up("up"); time.sleep(config.TIME_UP_JUMP_WAIT)
         elif action == "down_jump":
             handler.key_down("down"); handler.press(jump_key); handler.key_up("down")
-            time.sleep(0.5)
+            time.sleep(config.TIME_DOWN_JUMP_WAIT)
         elif action == "jump":
-            handler.press(jump_key); time.sleep(0.5)
+            handler.press(jump_key); time.sleep(config.TIME_JUMP_DELAY)
         elif action == "move_left":
-            handler.press("left", duration=0.15)
+            handler.press("left", duration=config.TIME_KEY_PRESS)
         elif action == "move_right":
-            handler.press("right", duration=0.15)
+            handler.press("right", duration=config.TIME_KEY_PRESS)
 
 
 class EmergencyState(BaseState):
@@ -247,12 +254,12 @@ class EmergencyState(BaseState):
     def execute(self, agent) -> BaseState:
         agent.last_action = "Recovering"
         agent.action_handler.emergency_stop()
-        time.sleep(1.0)
+        time.sleep(config.TIME_RECOVERY_WAIT)        
         
         # 복구 시도 (점프)
         jump_key = agent.key_mapping.get('jump', 'alt')
         agent.action_handler.press(jump_key)
-        time.sleep(0.5)
+        time.sleep(config.TIME_RECOVERY_WAIT)
         
         # 플레이어 확인 후 복구되면 IDLE로 전환
         agent.current_frame = agent.vision.capture()

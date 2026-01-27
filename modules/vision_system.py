@@ -7,6 +7,7 @@ import ctypes
 from ctypes import wintypes
 import pygetwindow as gw
 import time
+import config 
 from utils.logger import logger, trace_logic
 
 # DPI 인식 설정 (좌표 밀림 방지)
@@ -26,18 +27,18 @@ class RECT(ctypes.Structure):
 
 class VisionSystem:
     def __init__(self):
-        self.capture_area = {"top": 0, "left": 0, "width": 1366, "height": 768}
+        self.capture_area = {
+            "top": 0, "left": 0, 
+            "width": config.DEFAULT_RES_W, 
+            "height": config.DEFAULT_RES_H
+        }
         self.window_found = False
         self.hwnd = None
-        # self.sct = mss.mss()  <-- [삭제] 여기서 생성하면 스레드 충돌 발생
         
-        # [신규] ROI 관리 변수
-        self.minimap_roi = None  # (x, y, w, h)
-        self.kill_roi = None     # (x, y, w, h)
-        self.skill_rois = {}     # {name: {'rect': (x,y,w,h), 'threshold': 100.0}}
-        
-        # 디버깅용 정보 (UI 표시를 위해 현재 밝기 등을 저장)
-        self.skill_debug_info = {} 
+        self.minimap_roi = None
+        self.kill_roi = None
+        self.skill_rois = {}
+        self.skill_debug_info = {}
 
     def _get_client_area(self, hwnd):
         """창의 테두리를 제외한 실제 게임 화면 좌표 계산"""
@@ -68,8 +69,7 @@ class VisionSystem:
             if win.isMinimized:
                 logger.info("최소화된 창을 복구합니다.")
                 win.restore()
-                time.sleep(0.5)
-            
+                time.sleep(config.WINDOW_RESTORE_DELAY)            
             # 클라이언트 영역 계산
             rect = self._get_client_area(self.hwnd)
             if not rect:
@@ -146,12 +146,11 @@ class VisionSystem:
                 if roi.size > 0:
                     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
                     v_mean = np.mean(hsv[:, :, 2])
-                    threshold = v_mean * 0.7
+                    threshold = v_mean * config.SKILL_THRESH_RATIO
                     logger.debug(f"[{name}] 자동 임계값 계산: 현재 밝기 {v_mean:.1f} -> 기준 {threshold:.1f}")
             
         if threshold is None: 
-            threshold = 100.0 # 기본값
-
+            threshold = config.DEFAULT_SKILL_THRESH
         self.skill_rois[name] = {'rect': rect, 'threshold': threshold}
         logger.info(f"스킬 ROI 등록: {name} {rect} (Thresh: {threshold:.1f})")
 
@@ -239,7 +238,7 @@ class VisionSystem:
             user32.SetForegroundWindow(self.hwnd)
             
             logger.debug("게임 창 활성화 시도...")
-            time.sleep(0.2) # 전환 대기 시간
+            time.sleep(config.WINDOW_ACTIVATE_DELAY)
             return True
         except Exception as e:
             logger.error(f"창 활성화 실패: {e}")

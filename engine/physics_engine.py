@@ -2,6 +2,7 @@
 
 import torch
 import os
+import config
 # [수정] 두 클래스 모두 임포트
 from modules.physics_model import HybridPhysicsNet, LegacyPhysicsNet
 from utils.logger import logger
@@ -38,10 +39,12 @@ class PhysicsEngine:
                     self.model = HybridPhysicsNet(num_actions=num_actions).to(self.device)
                     self.model.load_state_dict(state_dict)
                 else:
-                    num_actions = 16
+                    # [수정] 16 -> config.PHYSICS_ACTION_DIM_DEFAULT
+                    num_actions = config.PHYSICS_ACTION_DIM_DEFAULT
+                
                 logger.info(f"신버전 물리 모델 감지 (Actions: {num_actions})")
                 self.model = HybridPhysicsNet(num_actions=num_actions).to(self.device)
-                self.model.load_state_dict(state_dict) # 신버전은 엄격하게 로드
+                self.model.load_state_dict(state_dict)
             
             self.model.eval()
             self.is_loaded = True
