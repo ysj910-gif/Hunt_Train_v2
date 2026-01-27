@@ -182,6 +182,10 @@ class CombatState(BaseState):
     def _apply_keys(self, agent, keys):
         handler = agent.action_handler
         mapping = agent.key_mapping
+
+        main_attack_key = mapping.get('main', config.DEFAULT_KEYS['main']) 
+        jump_key = mapping.get('jump', config.DEFAULT_KEYS['jump'])
+        
         main_attack_key = mapping.get('main', config.DEFAULT_KEYS['main'])
 
         if 'left' in keys: handler.key_down('left')

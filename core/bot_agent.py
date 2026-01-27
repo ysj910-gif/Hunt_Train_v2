@@ -7,6 +7,7 @@ import datetime
 import config 
 from typing import Tuple, Optional, Dict, Any, TYPE_CHECKING
 from utils.logger import logger
+from modules.job_manager import JobManager
 
 # 상태 열거형 (DecisionMaker와 공유)
 try:
@@ -45,6 +46,10 @@ class BotAgent:
         self.map_processor = map_processor
         self.path_finder = path_finder
         self.recorder = recorder
+
+        self.job_manager = JobManager() 
+        self.key_mapping = self.job_manager.get_key_mapping() # jobs.json 값 적용
+        logger.info(f"🎹 Key Mapping Initialized: {self.key_mapping}")
         
         self.brain: Optional["DecisionMaker"] = None
 

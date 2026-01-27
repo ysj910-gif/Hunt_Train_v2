@@ -1,5 +1,6 @@
 import json
 import os
+import config
 from utils.logger import logger
 
 class JobManager:
@@ -7,24 +8,47 @@ class JobManager:
     직업 이름과 ID 매핑을 관리하는 클래스.
     새로운 직업이 발견되면 자동으로 ID를 부여하고 jobs.json에 저장합니다.
     """
-    def __init__(self, filepath="jobs.json"):
-        self.filepath = filepath
-        self.job_map = self._load_jobs()
-
-    def _load_jobs(self):
-        """jobs.json 파일 로드"""
-        if not os.path.exists(self.filepath):
-            logger.info(f"직업 파일이 없어 새로 생성합니다: {self.filepath}")
-            return {}
+    def __init__(self, job_file="jobs.json"):
+        self.job_file = job_file
+        self.jobs_data = {}
+        self.current_job_name = config.CURRENT_JOB
+        self.current_mapping = config.DEFAULT_KEYS.copy()
+        self.skill_info = {}
         
+        self.load_jobs()
+
+    def load_jobs(self):
+        if not os.path.exists(self.job_file):
+            logger.warning(f"⚠️ {self.job_file} not found. Using default keys.")
+            return
+
         try:
-            with open(self.filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                logger.debug(f"직업 목록 로드 완료 ({len(data)}개)")
-                return data
+            with open(self.job_file, 'r', encoding='utf-8') as f:
+                self.jobs_data = json.load(f)
+                
+            if self.current_job_name in self.jobs_data:
+                job_data = self.jobs_data[self.current_job_name]
+                
+                # 키 매핑 로드 (기본값 위에 덮어쓰기)
+                if "key_mapping" in job_data:
+                    self.current_mapping.update(job_data["key_mapping"])
+                    
+                # 스킬 정보 로드 (쿨타임 등)
+                if "skill_settings" in job_data:
+                    self.skill_info = job_data["skill_settings"]
+                    
+                logger.info(f"✅ Loaded settings for job: {self.current_job_name}")
+            else:
+                logger.warning(f"⚠️ Job '{self.current_job_name}' not found in {self.job_file}. Using defaults.")
+                
         except Exception as e:
-            logger.error(f"직업 파일 로드 실패: {e}")
-            return {}
+            logger.error(f"❌ Failed to parse {self.job_file}: {e}")
+
+    def get_key_mapping(self):
+        return self.current_mapping
+
+    def get_skill_cooldown(self, skill_name):
+        return self.skill_info.get(skill_name, {}).get("cooldown", 0)
 
     def _save_jobs(self):
         """직업 목록 저장"""
