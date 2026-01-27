@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+from modules.map_creator import MapCreator  # [신규] 분리된 로직 모듈 임포트
 
 class MapTab:
     def __init__(self, notebook, agent, save_callback=None):
@@ -52,6 +53,114 @@ class MapTab:
         self.lbl_physics = ttk.Label(model_frame, text="Physics: Not Loaded", foreground="gray")
         self.lbl_physics.pack()
         ttk.Button(model_frame, text="⚛️ Load Physics", command=self.load_physics_model).pack(fill="x", padx=5, pady=2)
+
+    # 4. [신규 UI] 맵 제작 도구 (Map Creator)
+        # ==========================================
+        self._setup_creator_ui()
+
+    def _setup_creator_ui(self):
+        """맵 제작 툴 UI 구성"""
+        creator_frame = ttk.LabelFrame(self.frame, text="Map Creator Tool")
+        creator_frame.pack(fill="x", pady=10)
+
+        # 현재 좌표 모니터링
+        self.lbl_current_pos = ttk.Label(creator_frame, text="Last Known Pos: (Wait...)", foreground="blue")
+        self.lbl_current_pos.pack(pady=2)
+        ttk.Button(creator_frame, text="🔄 Refresh Position Info", command=self.refresh_pos_info).pack(fill="x", padx=5, pady=2)
+
+        # 시작점/종료점 표시 영역
+        info_grid = ttk.Frame(creator_frame)
+        info_grid.pack(fill="x", padx=5, pady=5)
+        
+        ttk.Label(info_grid, text="Start Point:").grid(row=0, column=0, sticky="w")
+        self.lbl_start_pos = ttk.Label(info_grid, text="Not Set", foreground="red")
+        self.lbl_start_pos.grid(row=0, column=1, sticky="w", padx=5)
+
+        ttk.Label(info_grid, text="End Point:").grid(row=1, column=0, sticky="w")
+        self.lbl_end_pos = ttk.Label(info_grid, text="Not Set", foreground="red")
+        self.lbl_end_pos.grid(row=1, column=1, sticky="w", padx=5)
+
+        # 조작 버튼
+        btn_grid = ttk.Frame(creator_frame)
+        btn_grid.pack(fill="x", padx=5, pady=5)
+        
+        ttk.Button(btn_grid, text="1. Set Start", command=self.on_set_start).pack(side="left", expand=True, fill="x", padx=1)
+        ttk.Button(btn_grid, text="2. Set End", command=self.on_set_end).pack(side="left", expand=True, fill="x", padx=1)
+        
+        ttk.Button(creator_frame, text="3. ➕ Add Platform", command=self.on_add_platform).pack(fill="x", padx=5, pady=2)
+        
+        # 상태 표시
+        self.lbl_platform_count = ttk.Label(creator_frame, text="Platforms: 0", font=("Arial", 9, "bold"))
+        self.lbl_platform_count.pack(pady=2)
+
+        # 저장 버튼
+        ttk.Separator(creator_frame, orient='horizontal').pack(fill='x', pady=5)
+        ttk.Button(creator_frame, text="💾 Save New Map JSON", command=self.on_save_map).pack(fill="x", padx=5, pady=5)
+
+    # --- Event Handlers (UI Logic) ---
+
+    def refresh_pos_info(self):
+        """현재 좌표 UI 갱신"""
+        pos = self.map_creator.get_current_pos()
+        self.lbl_current_pos.config(text=f"Last Known Pos: {pos}")
+
+    def on_set_start(self):
+        """시작점 설정 버튼 핸들러"""
+        success, pos = self.map_creator.set_start_point()
+        self.refresh_pos_info()
+        
+        if success:
+            self.lbl_start_pos.config(text=f"{pos}", foreground="green")
+        else:
+            messagebox.showwarning("Warning", "플레이어 위치를 인식할 수 없습니다.\n미니맵에 노란 점이 보이는지 확인하세요.")
+
+    def on_set_end(self):
+        """종료점 설정 버튼 핸들러"""
+        success, pos = self.map_creator.set_end_point()
+        self.refresh_pos_info()
+        
+        if success:
+            self.lbl_end_pos.config(text=f"{pos}", foreground="green")
+        else:
+            messagebox.showwarning("Warning", "플레이어 위치를 인식할 수 없습니다.\n미니맵에 노란 점이 보이는지 확인하세요.")
+
+    def on_add_platform(self):
+        """발판 추가 버튼 핸들러"""
+        if not self.map_creator.is_ready_to_add():
+            messagebox.showerror("Error", "시작점과 종료점을 모두 설정해야 합니다.")
+            return
+
+        success, new_plat = self.map_creator.add_platform()
+        if success:
+            # UI 초기화
+            self.lbl_start_pos.config(text="Not Set", foreground="red")
+            self.lbl_end_pos.config(text="Not Set", foreground="red")
+            
+            count = self.map_creator.get_platform_count()
+            self.lbl_platform_count.config(text=f"Platforms: {count}")
+            print(f"[MapTab] Platform Added: {new_plat}")
+
+    def on_save_map(self):
+        """저장 버튼 핸들러"""
+        if self.map_creator.get_platform_count() == 0:
+            messagebox.showwarning("Warning", "저장할 발판 데이터가 없습니다.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON Files", "*.json")],
+            initialfile="new_map.json"
+        )
+        
+        if file_path:
+            success, msg = self.map_creator.save_map_to_json(file_path)
+            if success:
+                messagebox.showinfo("Success", f"맵 파일이 저장되었습니다.\n{os.path.basename(file_path)}")
+                if messagebox.askyesno("Reset", "저장 후 작업 내역을 초기화하시겠습니까?"):
+                    self.map_creator.clear_data()
+                    self.lbl_platform_count.config(text="Platforms: 0")
+            else:
+                messagebox.showerror("Error", f"저장 실패: {msg}")
 
     def update_file_label(self, file_type, path):
         filename = os.path.basename(path)
