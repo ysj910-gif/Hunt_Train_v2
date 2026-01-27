@@ -94,9 +94,6 @@ class MainWindow:
         self.canvas = tk.Canvas(self.canvas_frame, bg="black")
         self.canvas.pack(fill="both", expand=True)
         
-        self.canvas = tk.Canvas(self.canvas_frame, bg="black")
-        self.canvas.pack(fill="both", expand=True)
-        
         # 2-2. 하단: 상태 및 로그 패널
         self.status_frame = ttk.Frame(self.left_split)
         self.left_split.add(self.status_frame, weight=1) # 정보 영역 작게
@@ -166,43 +163,44 @@ class MainWindow:
             # [기존 게임 모드]
             debug_info = self.agent.get_debug_info()
 
-        # [신규] 창 제목에 FPS 실시간 표시
-        current_fps = debug_info.get("fps", 0.0)
-        self.root.title(f"MapleHunter v2.0 - [FPS: {current_fps:.1f}]")
-        
-        # 1. 상태 패널 업데이트
-        if self.status_panel:
-            self.status_panel.update_stats(debug_info)
-
-        # 2. 캔버스 그리기 (리사이징 적용)
-        ox = self.map_tab.map_offset_x
-        oy = self.map_tab.map_offset_y
-        
-        # 원본 OpenCV 이미지 생성
-        cv_img = Visualizer.draw_debug_view(debug_info, ox, oy)
-        
-        if cv_img is not None:
-            # ★ 캔버스의 현재 크기 가져오기
-            w = self.canvas.winfo_width()
-            h = self.canvas.winfo_height()
+            # [수정] 아래의 모든 로직을 else 블록 안으로 이동(들여쓰기)했습니다.
+            # debug_info가 정의된 상태에서만 실행되도록 변경
             
-            # [수정] 창이 초기화되어 크기가 1보다 클 때만 그리기 수행
-            if w > 1 and h > 1:
-                # 캔버스 크기에 맞춰 비율 유지하며 리사이징된 Tk 이미지 변환
+            # [신규] 창 제목에 FPS 실시간 표시
+            current_fps = debug_info.get("fps", 0.0)
+            self.root.title(f"MapleHunter v2.0 - [FPS: {current_fps:.1f}]")
+            
+            # 1. 상태 패널 업데이트
+            if self.status_panel:
+                self.status_panel.update_stats(debug_info)
 
-                target_w = int(w * self.view_scale)
-                target_h = int(h * self.view_scale)
+            # 2. 캔버스 그리기 (리사이징 적용)
+            ox = self.map_tab.map_offset_x
+            oy = self.map_tab.map_offset_y
+            
+            # 원본 OpenCV 이미지 생성
+            cv_img = Visualizer.draw_debug_view(debug_info, ox, oy)
+            
+            if cv_img is not None:
+                # ★ 캔버스의 현재 크기 가져오기
+                w = self.canvas.winfo_width()
+                h = self.canvas.winfo_height()
                 
-                tk_img = Visualizer.convert_to_tk_image(cv_img, target_w=w, target_h=h)
-                
-                if tk_img:
-                    # 캔버스 중앙에 배치
-                    self.canvas.create_image(w//2, h//2, image=tk_img, anchor="center")
-                    self.canvas.image = tk_img
+                # 창이 초기화되어 크기가 1보다 클 때만 그리기 수행
+                if w > 1 and h > 1:
+                    # 캔버스 크기에 맞춰 비율 유지하며 리사이징된 Tk 이미지 변환
+                    target_w = int(w * self.view_scale)
+                    target_h = int(h * self.view_scale)
+                    
+                    tk_img = Visualizer.convert_to_tk_image(cv_img, target_w=target_w, target_h=target_h)
+                    
+                    if tk_img:
+                        # 캔버스 중앙에 배치
+                        self.canvas.create_image(w//2, h//2, image=tk_img, anchor="center")
+                        self.canvas.image = tk_img
 
         self.root.after(30, self.update_ui_loop)
 
-    # ... (나머지 핸들러 메서드들은 기존 코드 그대로 유지) ...
     def find_window_action(self):
         if self.agent.vision.find_window():
             messagebox.showinfo("성공", "창을 찾았습니다.")
@@ -243,17 +241,20 @@ class MainWindow:
             messagebox.showerror("오류", f"봇 시작 실패:\n{e}")
 
     def change_zoom(self, delta, reset=False):
+        # 현재 활성화된 뷰포트 결정
+        target_viewport = self.sim_mode.viewport if (self.is_simulating and self.sim_mode) else self.viewport
+        
         if reset:
-            self.view_scale = 1.0
+            target_viewport.zoom_scale = 1.0
+            if self.is_simulating and self.sim_mode:
+                target_viewport.zoom_scale = 4.0 # 시뮬레이션 기본값 복구
+                target_viewport.center_view()
         else:
-            self.view_scale += delta
-            # 최소 20% ~ 최대 500% 제한
-            self.view_scale = max(0.2, min(5.0, self.view_scale))
+            target_viewport.adjust_zoom(delta)
             
         # 라벨 업데이트
-        self.lbl_zoom.config(text=f"{int(self.view_scale * 100)}%")
+        self.lbl_zoom.config(text=f"{int(target_viewport.zoom_scale * 100)}%")
         
-        # 시뮬레이션 중이라면 즉시 다시 그리기 요청
         if self.is_simulating and self.sim_mode:
             self.sim_mode.draw()
 
@@ -509,3 +510,30 @@ class MainWindow:
             self.canvas.config(bg="black")
             
         return self.is_simulating
+    
+    def on_canvas_drag(self, event):
+        dx = event.x - self.last_mouse_pos[0]
+        dy = event.y - self.last_mouse_pos[1]
+        self.last_mouse_pos = (event.x, event.y)
+        
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        
+        # [수정] 모드에 따라 제어할 뷰포트 선택
+        if self.is_simulating and self.sim_mode:
+            self.sim_mode.viewport.pan_move(dx, dy, cw, ch)
+            self.sim_mode.draw()
+        else:
+            self.viewport.pan_move(dx, dy, cw, ch)
+
+    def on_mouse_wheel(self, event):
+        delta = 0.2 if event.delta > 0 else -0.2
+        
+        # [수정] 모드에 따라 제어할 뷰포트 선택
+        if self.is_simulating and self.sim_mode:
+            self.sim_mode.viewport.adjust_zoom(delta)
+            self.sim_mode.draw()
+        else:
+            self.viewport.adjust_zoom(delta)
+
+    

@@ -6,6 +6,7 @@ from engine.map_processor import MapProcessor
 from engine.path_finder import PathFinder
 from engine.physics_engine import PhysicsEngine
 from utils.logger import logger, trace_logic
+from ui.components.viewport_manager import ViewportManager # [추가] 클래스 임포트
 import math
 
 class SimulationMode:
@@ -16,17 +17,17 @@ class SimulationMode:
     def __init__(self, main_window):
         self.mw = main_window
         self.canvas = main_window.canvas
-        self.viewport = main_window.viewport
+        
+        # [수정] 메인 윈도우의 뷰포트를 공유하지 않고, 독립적인 인스턴스 생성
+        self.viewport = ViewportManager() 
         
         # 1. 엔진 초기화
-        self.map_processor = self.mw.agent.map_processor # 메인 윈도우의 맵 프로세서 공유
-        self.physics_engine = PhysicsEngine() # 물리 엔진 인스턴스
+        self.map_processor = self.mw.agent.map_processor
+        self.physics_engine = PhysicsEngine()
         
-        # 물리 엔진 모델 로드 (설정에 저장된 경로 사용)
         if self.mw.cur_rf_path:
             self.physics_engine.load_model(self.mw.cur_rf_path)
         
-        # 경로 탐색기 (물리 엔진 연동)
         self.path_finder = PathFinder(self.map_processor, self.physics_engine)
         
         # 2. 캐릭터 상태 변수
@@ -36,28 +37,20 @@ class SimulationMode:
         self.vy = 0.0
         self.is_ground = True
         
-        # 시뮬레이션 루프 제어
         self.active = False
         self.last_time = time.time()
         
-        # 렌더링 설정
-        self.scale = 4.0 # 확대 배율
-        self.offset_x = 0
-        self.offset_y = 0
-
+        # [수정] 맵 데이터에 맞춰 월드 크기 설정
         if self.map_processor.platforms:
-            # 발판 중 가장 멀리 있는 x, y 좌표를 찾음
             max_x = max(p['x_end'] for p in self.map_processor.platforms)
             max_y = max(p['y'] for p in self.map_processor.platforms)
-            
-            # 여백을 조금 추가하여 설정 (예: +20px)
-            # 미니맵 좌표계가 작으므로 이 정도면 충분
-            self.viewport.set_world_size(max_x + 30, max_y + 30)
+            self.viewport.set_world_size(max_x + 20, max_y + 20)
         else:
-            # 데이터가 없으면 기본값 사용
             self.viewport.set_world_size(300, 200)
             
-        self.viewport.zoom_scale = 4.0 # 시뮬레이션 기본 줌
+        # 시뮬레이션에 적합한 기본 줌 설정 (미니맵은 작으므로 크게 확대)
+        self.viewport.zoom_scale = 4.0 
+        self.viewport.center_view() # 뷰 중앙 정렬
 
     def start(self):
         self.active = True
@@ -153,7 +146,7 @@ class SimulationMode:
         cw = self.canvas.winfo_width()
         ch = self.canvas.winfo_height()
         
-        # [수정] ViewportManager를 이용한 좌표 변환 함수
+        # [수정] 자신의 viewport 인스턴스 사용
         def to_screen(x, y):
             return self.viewport.world_to_screen(x, y, cw, ch)
 
@@ -167,6 +160,6 @@ class SimulationMode:
         px, py = to_screen(self.char_x, self.char_y)
         self.canvas.create_oval(px-10, py-25, px+10, py, fill="#FF5555", outline="white", width=2, tags="sim_obj")
         
-        # 3. 줌/좌표 정보 텍스트
+        # 3. 정보 텍스트 (자신의 줌 스케일 표시)
         info_text = f"Sim Pos: ({self.char_x:.1f}, {self.char_y:.1f}) | Zoom: x{self.viewport.zoom_scale:.1f}"
         self.canvas.create_text(10, 10, anchor="nw", text=info_text, fill="yellow", font=("Arial", 12, "bold"), tags="sim_obj")
