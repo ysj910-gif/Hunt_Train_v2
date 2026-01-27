@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "GUI Trainer 테스트",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/physics/physics_trainer.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "Corrected_Royal_Library_6.json" 
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": true
+        }
+    ]
+}
