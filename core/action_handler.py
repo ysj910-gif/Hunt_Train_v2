@@ -145,7 +145,7 @@ class ActionHandler:
             logger.error(f"Serial Write Error: {e}")
 
     # [수정] 모드에 따른 분기 처리 및 키 매핑 적용
-    @trace_logic
+    #@trace_logic
     def key_down(self, key_name: str):
         if self.mode == "SOFTWARE":
             code = self._get_scan_code(key_name)
@@ -195,7 +195,7 @@ class ActionHandler:
 
         return required_time * 1.1
 
-    @trace_logic
+    #@trace_logic
     def move_x(self, target_x: int, get_current_pos: Callable[[], Tuple[int, int]], tolerance: int = 10) -> bool:       
         self._stop_event.clear()
         current_pos = get_current_pos()
@@ -254,7 +254,7 @@ class ActionHandler:
             return PhysicsUtils.calc_distance(now_pos, self.tracker.prev_pos) > 10
         return False
 
-    @trace_logic
+    #@trace_logic
     def jump_shot(self, direction: Optional[str] = None, jump_key: str = 'jump', attack_key: str = 'attack'):
         if direction: self.key_down(direction)
         

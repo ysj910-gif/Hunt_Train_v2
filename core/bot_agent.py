@@ -149,7 +149,7 @@ class BotAgent:
         except KeyError:
             logger.error(f"Invalid state name: {state_name}")
 
-    @trace_logic
+    #@trace_logic
     def _main_loop(self):
         self.last_loop_time = time.time()
         print(">>> [DEBUG] _main_loop 진입")

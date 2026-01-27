@@ -44,13 +44,13 @@ class DecisionMaker:
         elif state == BotState.EMERGENCY:
             self._handle_emergency()
 
-    @trace_logic
+    #@trace_logic
     def _handle_idle(self):
         self.agent.last_action = "Idle"
         self.agent.last_action_desc = "Waiting..."
         time.sleep(0.1)
 
-    @trace_logic
+    #@trace_logic
     def _handle_maps(self):
         if not self.agent.player_pos: return
         target_pos = self.agent.path_finder.find_next_patrol_target(self.agent.player_pos)

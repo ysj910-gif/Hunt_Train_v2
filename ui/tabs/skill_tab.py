@@ -1,7 +1,7 @@
 # ui/tabs/skill_tab.py
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-from ui.roi_selector import ROISelector
+from ui.components.roi_selector import ROISelector
 
 class SkillTab:
     def __init__(self, notebook, agent, job_mgr, save_callback):

@@ -50,7 +50,7 @@ class AStarPathFinder:
             if math.hypot(curr.x - target_pos[0], curr.y - target_pos[1]) < self.GOAL_TOLERANCE:
                 return self._reconstruct_path(curr)
 
-            state_key = (curr.platform_id, int(curr.x // 10)) # 그리드 크기 20 -> 10으로 정밀화
+            state_key = (curr.platform_id, int(curr.x // 2)) 
             if state_key in closed_set:
                 continue
             closed_set.add(state_key)
@@ -83,6 +83,7 @@ class AStarPathFinder:
     def _heuristic(self, pos, target):
         return math.hypot(target[0] - pos[0], target[1] - pos[1]) / 10.0 # 거리 비용 가중치 조절
 
+    @trace_logic
     def _simulate_action(self, node, action):
         """물리 엔진을 이용해 행동 결과 예측 (미니맵 스케일 적용)"""
         

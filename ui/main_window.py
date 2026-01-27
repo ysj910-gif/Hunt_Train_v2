@@ -6,11 +6,15 @@ import os
 
 # 모듈 임포트
 from modules.job_manager import JobManager
-from ui.roi_selector import ROISelector
-from ui.visualizer import Visualizer
 from ui.tabs.skill_tab import SkillTab
 from ui.tabs.map_tab import MapTab
-from ui.status_panel import StatusPanel  # [신규 추가]
+from ui.tabs.simulation_tab import SimulationTab
+from ui.components.status_panel import StatusPanel  # [신규 추가]
+from ui.components.roi_selector import ROISelector
+from ui.components.visualizer import Visualizer
+from ui.components.viewport_manager import ViewportManager
+from ui.components.simulation_mode import SimulationMode
+
 
 class MainWindow:
     def __init__(self, root, agent):
@@ -29,11 +33,22 @@ class MainWindow:
 
         self.skill_tab = None
         self.map_tab = None
+        self.simulation_tab = None  # [추가] 변수 초기화
         self.status_panel = None # [신규]
+        self.sim_mode = None # 시뮬레이션 모드 객체
+        self.is_simulating = False
+
+        self.viewport = ViewportManager() 
+        self.last_mouse_pos = (0, 0)
+        self.view_scale = 1.0
+
+        self.sim_mode = None
+        self.is_simulating = False
         
         self.setup_ui()
         self.load_settings()
         self.update_ui_loop()
+        
 
     def setup_ui(self):
         # 1. 메인 좌우 분할
@@ -53,6 +68,31 @@ class MainWindow:
         # 2-1. 상단: 게임 화면
         self.canvas_frame = ttk.Frame(self.left_split)
         self.left_split.add(self.canvas_frame, weight=3) # 화면 영역 크게
+
+        # [신규] 줌 컨트롤 바 추가 (캔버스 바로 위에 배치)
+        zoom_frame = ttk.Frame(self.canvas_frame)
+        zoom_frame.pack(side="top", fill="x", padx=5, pady=2)
+        
+        ttk.Label(zoom_frame, text="View Zoom:").pack(side="left")
+        
+        # 줌 아웃 버튼
+        btn_minus = ttk.Button(zoom_frame, text="🔍-", width=3, command=lambda: self.change_zoom(-0.2))
+        btn_minus.pack(side="left", padx=2)
+        
+        # 현재 배율 표시 라벨
+        self.lbl_zoom = ttk.Label(zoom_frame, text="100%", width=6, anchor="center")
+        self.lbl_zoom.pack(side="left", padx=2)
+        
+        # 줌 인 버튼
+        btn_plus = ttk.Button(zoom_frame, text="🔍+", width=3, command=lambda: self.change_zoom(0.2))
+        btn_plus.pack(side="left", padx=2)
+        
+        # 리셋 버튼
+        btn_reset = ttk.Button(zoom_frame, text="Reset", width=5, command=lambda: self.change_zoom(0, reset=True))
+        btn_reset.pack(side="left", padx=5)
+
+        self.canvas = tk.Canvas(self.canvas_frame, bg="black")
+        self.canvas.pack(fill="both", expand=True)
         
         self.canvas = tk.Canvas(self.canvas_frame, bg="black")
         self.canvas.pack(fill="both", expand=True)
@@ -72,6 +112,10 @@ class MainWindow:
         
         # [수정] MapTab에도 save_settings 콜백 전달
         self.map_tab = MapTab(self.tabs, self.agent, self.save_settings)
+
+        self.simulation_tab = SimulationTab(self.tabs, self) 
+        self.tabs.add(self.simulation_tab, text="🧪 Simulation")
+
         # 4. 하단 컨트롤 패널
         self.create_bottom_panel()
 
@@ -113,7 +157,14 @@ class MainWindow:
         if not self.canvas.winfo_exists():
             return
 
-        debug_info = self.agent.get_debug_info()
+        if self.is_simulating and self.sim_mode:
+            # [시뮬레이션 모드]
+            # 물리 연산 및 화면 갱신 수행
+            self.sim_mode.update()
+            
+        else:
+            # [기존 게임 모드]
+            debug_info = self.agent.get_debug_info()
 
         # [신규] 창 제목에 FPS 실시간 표시
         current_fps = debug_info.get("fps", 0.0)
@@ -138,12 +189,16 @@ class MainWindow:
             # [수정] 창이 초기화되어 크기가 1보다 클 때만 그리기 수행
             if w > 1 and h > 1:
                 # 캔버스 크기에 맞춰 비율 유지하며 리사이징된 Tk 이미지 변환
+
+                target_w = int(w * self.view_scale)
+                target_h = int(h * self.view_scale)
+                
                 tk_img = Visualizer.convert_to_tk_image(cv_img, target_w=w, target_h=h)
                 
                 if tk_img:
                     # 캔버스 중앙에 배치
                     self.canvas.create_image(w//2, h//2, image=tk_img, anchor="center")
-                    self.canvas.image = tk_img # GC 방지
+                    self.canvas.image = tk_img
 
         self.root.after(30, self.update_ui_loop)
 
@@ -187,7 +242,21 @@ class MainWindow:
             traceback.print_exc()
             messagebox.showerror("오류", f"봇 시작 실패:\n{e}")
 
-    # (코드 중략: 기존 메서드들은 변경 사항 없음)
+    def change_zoom(self, delta, reset=False):
+        if reset:
+            self.view_scale = 1.0
+        else:
+            self.view_scale += delta
+            # 최소 20% ~ 최대 500% 제한
+            self.view_scale = max(0.2, min(5.0, self.view_scale))
+            
+        # 라벨 업데이트
+        self.lbl_zoom.config(text=f"{int(self.view_scale * 100)}%")
+        
+        # 시뮬레이션 중이라면 즉시 다시 그리기 요청
+        if self.is_simulating and self.sim_mode:
+            self.sim_mode.draw()
+
     def open_roi_selector(self, target):
         if not self.agent.vision.window_found:
             messagebox.showwarning("경고", "먼저 창을 찾아주세요.")
@@ -421,3 +490,22 @@ class MainWindow:
         # 체크박스 상태에 따라 로거의 스위치를 켬/끔
         is_on = self.chk_trace.get()
         logger.set_tracing(is_on)
+
+    def toggle_simulation_mode(self):
+        """시뮬레이션 모드 켜기/끄기"""
+        self.is_simulating = not self.is_simulating
+        
+        if self.is_simulating:
+            # 시뮬레이션 모드 객체 생성 (초기화)
+            if not self.sim_mode:
+                self.sim_mode = SimulationMode(self)
+            self.sim_mode.start()
+            self.canvas.config(bg="#222222") # 배경색 변경으로 모드 구분
+            self.root.title("MapleHunter v2.0 - [SIMULATION MODE]")
+        else:
+            if self.sim_mode:
+                self.sim_mode.stop()
+            self.canvas.delete("sim_obj") # 시뮬레이션 객체 삭제
+            self.canvas.config(bg="black")
+            
+        return self.is_simulating
