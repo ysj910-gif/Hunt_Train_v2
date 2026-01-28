@@ -1,6 +1,7 @@
 # modules/map_creator.py
 import json
 import logging
+from utils.logger import trace_logic, logger # [수정] 아키텍처 로거 사용
 
 # 로거 설정 (없으면 기본 로거 사용)
 logger = logging.getLogger("MapCreator")
@@ -19,6 +20,9 @@ class MapCreator:
         self.new_map_portals = []  # [신규] 맵 이동 포탈 저장소
         self.new_spawns = [] 
         self.no_spawn_zones = []
+
+        self.selected_type = None
+        self.selected_index = None
         
         # [실행 취소 스택] (타입, 객체) 튜플을 저장하여 순서대로 취소
         self.action_history = []
@@ -350,5 +354,44 @@ class MapCreator:
             msg = f"로드 실패: {e}"
             logger.error(f"[MapCreator] Load Error: {msg}")
             return False, msg
+    
+    # @trace_logic
+    def select_object(self, obj_type, index):
+        """UI에서 선택한 객체의 정보를 저장합니다."""
+        self.selected_type = obj_type
+        self.selected_index = index
+        logger.debug(f"[MapCreator] Selected: {obj_type} #{index}")
 
+    # [신규] 선택된 객체 삭제 메서드
+    # @trace_logic
+    def delete_selected(self):
+        """현재 선택된 객체를 리스트에서 삭제합니다."""
+        if self.selected_type is None or self.selected_index is None:
+            return False, "선택된 객체가 없습니다."
+        
+        try:
+            # 타입별 리스트에서 해당 인덱스 삭제
+            if self.selected_type == "platform":
+                del self.new_platforms[self.selected_index]
+            elif self.selected_type == "portal":
+                del self.new_portals[self.selected_index]
+            elif self.selected_type == "rope":
+                del self.new_ropes[self.selected_index]
+            elif self.selected_type == "map_portal":
+                del self.new_map_portals[self.selected_index]
+            elif self.selected_type == "spawn":
+                 del self.new_spawns[self.selected_index]
+            else:
+                return False, "삭제할 수 없는 객체 타입입니다."
+            
+            # 삭제 후 선택 초기화
+            logger.info(f"[MapCreator] Deleted {self.selected_type} #{self.selected_index}")
+            self.selected_type = None
+            self.selected_index = None
+            return True, "삭제되었습니다."
+            
+        except IndexError:
+            return False, "이미 삭제되었거나 존재하지 않는 인덱스입니다."
+        except Exception as e:
+            return False, f"삭제 중 오류 발생: {str(e)}"
     

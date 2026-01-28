@@ -2,6 +2,7 @@
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+from utils.logger import trace_logic, logger # [수정] 아키텍처 로거 사용
 
 class Visualizer:
     @staticmethod
@@ -85,29 +86,69 @@ class Visualizer:
         # --- [2] 맵 제작 도구 데이터 그리기 (Creator Data) ---
         # MainWindow에서 주입해준 creator_data 참조
         creator = debug_info.get("creator_data", {})
+
+        sel_type = creator.get("selected_type")
+        sel_idx = creator.get("selected_index")
+        
+        # [신규] 선택된 객체 정보 가져오기 (dict 형태라고 가정)
+        # MapCreator 객체가 그대로 넘어온다면 creator.selected_type으로 접근, 
+        # dict로 변환되어 넘어온다면 creator.get('selected_type') 사용. 
+        # 안전하게 .get() 사용 (MapCreator 수정 시 __dict__ 등을 넘겨준다고 가정)
         
         # 2-1. 작성 중인 새 발판 (Cyan)
-        for plat in creator.get("new_platforms", []):
+        # 2-1. 작성 중인 새 발판
+        for i, plat in enumerate(creator.get("new_platforms", [])): # <--- 여기 i가 꼭 있어야 합니다
             x1 = int(plat['x_start'] + off_x)
             x2 = int(plat['x_end'] + off_x)
             y = int(plat['y'] + off_y)
-            cv2.line(vis_frame, (x1, y), (x2, y), (255, 255, 0), 2) # Cyan
-            cv2.putText(vis_frame, "NEW", (x1, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+            
+            # 선택된 발판 하이라이트
+            if sel_type == "platform" and i == sel_idx:
+                color = (0, 0, 255) # Red (BGR)
+                thickness = 4
+                cv2.putText(vis_frame, f"SELECT #{i}", (x1, y-15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            else:
+                color = (255, 255, 0) # Cyan
+                thickness = 2
+                
+            cv2.line(vis_frame, (x1, y), (x2, y), color, thickness)
+            
+            # 선택되지 않은 것만 NEW 표시 (선택된 건 SELECT 표시가 있으므로)
+            if not (sel_type == "platform" and i == sel_idx):
+                cv2.putText(vis_frame, "NEW", (x1, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
 
         # 2-2. 작성 중인 새 포탈 (Magenta)
-        for p in creator.get("new_portals", []):
+        for i, p in enumerate(creator.get("new_portals", [])): # <--- enumerate 확인
             src = p['src']; dst = p['dst']
             sx, sy = int(src[0] + off_x), int(src[1] + off_y)
             dx, dy = int(dst[0] + off_x), int(dst[1] + off_y)
-            cv2.circle(vis_frame, (sx, sy), 6, (255, 0, 255), 2)
-            cv2.line(vis_frame, (sx, sy), (dx, dy), (255, 0, 255), 1)
+            
+            if sel_type == "portal" and i == sel_idx:
+                color = (0, 0, 255)
+                thickness = 3
+                radius = 8
+            else:
+                color = (255, 0, 255) # Magenta
+                thickness = 2
+                radius = 6
+
+            cv2.circle(vis_frame, (sx, sy), radius, color, thickness)
+            cv2.line(vis_frame, (sx, sy), (dx, dy), color, 1)
 
         # 2-3. 작성 중인 새 밧줄 (Yellow)
-        for r in creator.get("new_ropes", []):
+        for i, r in enumerate(creator.get("new_ropes", [])): # <--- enumerate 확인
             rx = int(r['x'] + off_x)
             y1 = int(r['y_top'] + off_y)
             y2 = int(r['y_bottom'] + off_y)
-            cv2.line(vis_frame, (rx, y1), (rx, y2), (0, 255, 255), 2)
+            
+            if sel_type == "rope" and i == sel_idx:
+                color = (0, 0, 255)
+                thickness = 4
+            else:
+                color = (0, 255, 255) # Yellow
+                thickness = 2
+                
+            cv2.line(vis_frame, (rx, y1), (rx, y2), color, thickness)
 
         # 2-4. 작성 중인 맵 이동 포탈 (White Circle)
         for mp in creator.get("new_map_portals", []):

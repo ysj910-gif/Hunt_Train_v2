@@ -179,7 +179,11 @@ class MainWindow:
                     "new_ropes": getattr(creator, 'new_ropes', []),
                     "new_map_portals": getattr(creator, 'new_map_portals', []),
                     "temp_start": creator.temp_start_pos,
-                    "temp_end": creator.temp_end_pos
+                    "temp_end": creator.temp_end_pos,
+                
+
+                    "selected_type": getattr(creator, 'selected_type', None),
+                    "selected_index": getattr(creator, 'selected_index', None)
                 }
                 # debug_info에 'creator_data' 키로 추가
                 debug_info['creator_data'] = creator_data

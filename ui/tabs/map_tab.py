@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog # [수정] simpledialog 추가
 import os
 from modules.map_creator import MapCreator  # [신규] 분리된 로직 모듈 임포트
+from utils.logger import trace_logic, logger # [수정] 아키텍처 로거 사용
 
 class MapTab:
     def __init__(self, notebook, agent, save_callback=None):
@@ -425,6 +426,7 @@ class MapTab:
         self.ent_v3.grid(row=1, column=1, padx=1)
 
         ttk.Button(grid_frame, text="Update", command=self.on_update_object).grid(row=1, column=2, columnspan=2, sticky="ew", padx=1)
+        ttk.Button(grid_frame, text="🗑️ Delete", command=self.on_delete_object).grid(row=1, column=4, padx=2)
 
         # 2. [신규] 방향키 미세 조정 (Nudge)
         nudge_frame = ttk.Frame(self.edit_frame)
@@ -472,6 +474,7 @@ class MapTab:
             desc = f"X:{r['x']}, Y:{r['y_top']}~{r['y_bottom']}"
             self.tree.insert(parent_rope, "end", text=f"#{i}", values=(desc, "rope"), tags=("rope", str(i)))
 
+    #@trace_logic
     def on_tree_select(self, event):
         """리스트 선택 시 편집창에 값 채우기"""
         selected = self.tree.selection()
@@ -484,6 +487,10 @@ class MapTab:
         
         obj_type, idx_str = tags[0], tags[1]
         idx = int(idx_str)
+
+        print(f"[DEBUG-1] UI Selected: Type={obj_type}, Index={idx}")
+
+        self.map_creator.select_object(obj_type, idx)
         
         self.selected_item_type = obj_type
         self.selected_item_index = idx
@@ -591,3 +598,21 @@ class MapTab:
                     
         except Exception as e:
             print(f"Nudge Error: {e}")
+
+    #@trace_logic
+    def on_delete_object(self):
+        """선택한 오브젝트 삭제"""
+        if not self.selected_item_type or self.selected_item_index is None:
+            messagebox.showwarning("Warning", "삭제할 객체를 선택해주세요.")
+            return
+
+        if messagebox.askyesno("Delete", f"정말 {self.selected_item_type} #{self.selected_item_index} 항목을 삭제하시겠습니까?"):
+            success, msg = self.map_creator.delete_selected()
+            if success:
+                self.refresh_object_list() # 리스트 새로고침
+                self._update_status_ui()   # 상태 라벨 갱신
+                self.selected_item_type = None
+                self.selected_item_index = None
+                print(f"[MapTab] {msg}")
+            else:
+                messagebox.showerror("Error", msg)
