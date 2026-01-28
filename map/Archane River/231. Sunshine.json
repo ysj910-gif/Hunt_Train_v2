@@ -1,0 +1,118 @@
+{
+    "platforms": [
+        {
+            "x_start": 13,
+            "x_end": 34,
+            "y": 40,
+            "type": "platform"
+        },
+        {
+            "x_start": 39,
+            "x_end": 88,
+            "y": 21,
+            "type": "platform"
+        },
+        {
+            "x_start": 86,
+            "x_end": 116,
+            "y": 30,
+            "type": "platform"
+        },
+        {
+            "x_start": 118,
+            "x_end": 147,
+            "y": 17,
+            "type": "platform"
+        },
+        {
+            "x_start": 117,
+            "x_end": 154,
+            "y": 40,
+            "type": "platform"
+        },
+        {
+            "x_start": 55,
+            "x_end": 75,
+            "y": 40,
+            "type": "platform"
+        },
+        {
+            "x_start": 1,
+            "x_end": 170,
+            "y": 52,
+            "type": "platform"
+        }
+    ],
+    "portals": [
+        {
+            "src": [
+                25,
+                52
+            ],
+            "dst": [
+                144,
+                16
+            ]
+        },
+        {
+            "src": [
+                144,
+                16
+            ],
+            "dst": [
+                25,
+                52
+            ]
+        }
+    ],
+    "ropes": [
+        {
+            "x": 15,
+            "y_top": 39,
+            "y_bottom": 49
+        },
+        {
+            "x": 40,
+            "y_top": 20,
+            "y_bottom": 37
+        },
+        {
+            "x": 72,
+            "y_top": 39,
+            "y_bottom": 50
+        },
+        {
+            "x": 149,
+            "y_top": 40,
+            "y_bottom": 49
+        },
+        {
+            "x": 114,
+            "y_top": 31,
+            "y_bottom": 40
+        },
+        {
+            "x": 121,
+            "y_top": 18,
+            "y_bottom": 28
+        }
+    ],
+    "map_portals": [
+        {
+            "x": 65,
+            "y": 39,
+            "to_map": "230. Water and Sunshine"
+        },
+        {
+            "x": 166,
+            "y": 52,
+            "to_map": "232. Dirt"
+        },
+        {
+            "x": 4,
+            "y": 52,
+            "to_map": "230. Water"
+        }
+    ],
+    "spawns": []
+}

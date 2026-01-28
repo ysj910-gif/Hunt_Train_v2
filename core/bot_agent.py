@@ -8,6 +8,8 @@ import config
 from typing import Tuple, Optional, Dict, Any, TYPE_CHECKING
 from utils.logger import logger
 from modules.job_manager import JobManager
+from engine.skill_strategy import SkillStrategy
+
 
 # 상태 열거형 (DecisionMaker와 공유)
 try:
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
     from core.action_handler import ActionHandler
     from core.decision_maker import DecisionMaker
     from core.data_recorder import DataRecorder
+
 
 class BotAgent:
     def __init__(
@@ -51,6 +54,9 @@ class BotAgent:
         self.key_mapping = self.job_manager.get_key_mapping() # jobs.json 값 적용
         logger.info(f"🎹 Key Mapping Initialized: {self.key_mapping}")
         
+        self.skill_strategy = SkillStrategy(self.path_finder)
+        logger.info("⚔️ Skill Strategy Module Initialized.")
+
         self.brain: Optional["DecisionMaker"] = None
 
         # 2. State & Data
@@ -66,7 +72,6 @@ class BotAgent:
         self.last_action_desc = ""
         self.fps = 0.0
         self.last_loop_time = time.time()
-        self.key_mapping = {} 
         self.is_recording = False
 
         logger.info("✅ BotAgent Initialized with injected dependencies.")

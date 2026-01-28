@@ -70,40 +70,23 @@ class MapCreator:
         self.temp_end_pos = pos
         logger.info(f"[MapCreator] End Point Set: {pos}")
         return True, pos
-
-    def add_platform(self):
-        """임시 저장된 시작/종료점으로 발판을 생성합니다."""
-        if not self.temp_start_pos or not self.temp_end_pos:
-            return False, "시작점과 종료점이 설정되지 않았습니다."
-
-        x1, y1 = self.temp_start_pos
-        x2, y2 = self.temp_end_pos
-
-        # 좌표 정렬 및 계산
-        x_start = min(x1, x2)
-        x_end = max(x1, x2)
-        y_avg = int((y1 + y2) / 2) # 평지 가정
-        
-        # 유효성 검사 (폭이 너무 좁은 경우)
-        if (x_end - x_start) < 5:
-            return False, f"발판 길이가 너무 짧습니다 ({x_end - x_start}px)"
-
-        new_plat = {
-            "x_start": x_start,
-            "x_end": x_end,
-            "y": y_avg
-        }
-        
-        self.new_platforms.append(new_plat)
-        
-        # 상태 초기화
-        self.temp_start_pos = None
-        self.temp_end_pos = None
-        self.clear_manual_pos() # 발판 추가 후 수동 입력 해제 (선택사항)
-        
-        logger.info(f"[MapCreator] Platform Added: {new_plat}")
-        return True, new_plat
     
+    def add_no_spawn_zone(self, radius=50):
+        pos = self.get_current_pos()
+        if pos == (0, 0):
+            return False, "현재 위치를 인식할 수 없습니다."
+            
+        zone = {
+            "x": pos[0],
+            "y": pos[1],
+            "r": radius
+        }
+        self.no_spawn_zones.append(zone)
+        self.action_history.append(("no_spawn", zone))
+        
+        logger.info(f"[MapCreator] No-Spawn Zone Added: {zone}")
+        return True, f"현재 위치({pos})에 금지 구역이 설정되었습니다."
+
     def generate_spawns(self, total_monster_count):
         if not self.new_platforms:
             return False, "발판이 없습니다."
@@ -174,24 +157,38 @@ class MapCreator:
         self.temp_end_pos = None
         self.clear_manual_pos()
 
-    def add_platform(self):
-        if not self.is_ready_to_add():
-            return False, "시작점과 종료점이 설정되지 않았습니다."
+    def add_platform(self, is_bottom=False):
+        """임시 저장된 시작/종료점으로 발판을 생성합니다."""
+        # 시작점/종료점 확인 (is_ready_to_add 메서드가 없으면 self.temp_start_pos 체크로 대체 가능)
+        if hasattr(self, 'is_ready_to_add') and not self.is_ready_to_add():
+             return False, "시작점과 종료점이 설정되지 않았습니다."
+        elif not getattr(self, 'temp_start_pos', None) or not getattr(self, 'temp_end_pos', None):
+             return False, "시작점과 종료점이 설정되지 않았습니다."
 
         x1, y1 = self.temp_start_pos
         x2, y2 = self.temp_end_pos
 
+        # 좌표 정렬 및 계산
+        x_start = min(x1, x2)
+        x_end = max(x1, x2)
+        y_avg = int((y1 + y2) / 2) # 평지 가정
+        
+        # 유효성 검사 (폭이 너무 좁은 경우)
+        if (x_end - x_start) < 5:
+            return False, f"발판 길이가 너무 짧습니다 ({x_end - x_start}px)"
+
         new_plat = {
-            "x_start": min(x1, x2),
-            "x_end": max(x1, x2),
-            "y": int((y1 + y2) / 2)
+            "x_start": x_start,
+            "x_end": x_end,
+            "y": y_avg,
+            "type": "floor" if is_bottom else "platform" # [추가] 맨 아래 발판 여부 저장
         }
         
         self.new_platforms.append(new_plat)
         self.action_history.append(("platform", new_plat)) # 히스토리 기록
         self._reset_temp_pos()
         
-        logger.info(f"[MapCreator] Platform Added: {new_plat}")
+        logger.info(f"[MapCreator] Platform Added (Bottom={is_bottom}): {new_plat}")
         return True, new_plat
 
     def add_portal(self):
@@ -306,8 +303,52 @@ class MapCreator:
         self.new_platforms = []
         self.new_portals = []
         self.new_ropes = []
-        self.new_map_portals = [] # [신규] 초기화
+        self.new_map_portals = []
+        self.new_spawns = []           # ← 추가
+        self.no_spawn_zones = []       # ← 추가
         self.action_history = []
         self._reset_temp_pos()
+
+    def load_from_json(self, file_path):
+        """
+        기존 맵 JSON 파일을 읽어서 편집 가능한 상태로 로드합니다.
+        반환: (성공여부, 메시지)
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                map_data = json.load(f)
+            
+            # 기존 데이터 초기화
+            self.clear_data()
+            
+            # JSON에서 데이터 로드
+            self.new_platforms = map_data.get("platforms", [])
+            self.new_portals = map_data.get("portals", [])
+            self.new_ropes = map_data.get("ropes", [])
+            self.new_map_portals = map_data.get("map_portals", [])
+            self.new_spawns = map_data.get("spawns", [])
+            
+            # 로드 통계
+            summary = (f"발판: {len(self.new_platforms)}, "
+                    f"포탈: {len(self.new_portals)}, "
+                    f"밧줄: {len(self.new_ropes)}, "
+                    f"맵포탈: {len(self.new_map_portals)}, "
+                    f"스폰: {len(self.new_spawns)}")
+            
+            logger.info(f"[MapCreator] Loaded from {file_path} - {summary}")
+            return True, summary
+            
+        except FileNotFoundError:
+            msg = "파일을 찾을 수 없습니다."
+            logger.error(f"[MapCreator] Load Error: {msg}")
+            return False, msg
+        except json.JSONDecodeError as e:
+            msg = f"JSON 파싱 오류: {e}"
+            logger.error(f"[MapCreator] Load Error: {msg}")
+            return False, msg
+        except Exception as e:
+            msg = f"로드 실패: {e}"
+            logger.error(f"[MapCreator] Load Error: {msg}")
+            return False, msg
 
     

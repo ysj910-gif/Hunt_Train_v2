@@ -4,9 +4,9 @@
     "map_offset_y": 0,
     "minimap_roi": [
         9,
-        69,
-        180,
-        84
+        70,
+        175,
+        73
     ],
     "kill_roi": [
         211,
@@ -100,9 +100,13 @@
                     "dur": "60"
                 }
             ]
+        },
+        "Bowmaster": {
+            "skills": [],
+            "installs": []
         }
     },
-    "last_map_path": "",
+    "last_map_path": "C:/Users/ysj92/OneDrive/Main/Code/Maple_Arduino/Hunt_Train_v2/map/Archane River/231. Sunshine.json",
     "last_lstm_path": "",
     "last_rf_path": ""
 }
