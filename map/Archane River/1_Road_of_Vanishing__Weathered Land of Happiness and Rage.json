@@ -1,0 +1,86 @@
+{
+    "platforms": [
+        {
+            "x_start": 62,
+            "x_end": 138,
+            "y": 24
+        },
+        {
+            "x_start": 20,
+            "x_end": 38,
+            "y": 51
+        },
+        {
+            "x_start": 42,
+            "x_end": 101,
+            "y": 45
+        },
+        {
+            "x_start": 99,
+            "x_end": 155,
+            "y": 54
+        },
+        {
+            "x_start": 9,
+            "x_end": 155,
+            "y": 63
+        }
+    ],
+    "portals": [
+        {
+            "src": [
+                131,
+                63
+            ],
+            "dst": [
+                32,
+                63
+            ]
+        },
+        {
+            "src": [
+                32,
+                63
+            ],
+            "dst": [
+                125,
+                24
+            ]
+        },
+        {
+            "src": [
+                125,
+                24
+            ],
+            "dst": [
+                131,
+                63
+            ]
+        }
+    ],
+    "ropes": [
+        {
+            "x": 80,
+            "y_top": 26,
+            "y_bottom": 36
+        },
+        {
+            "x": 103,
+            "y_top": 26,
+            "y_bottom": 36
+        },
+        {
+            "x": 127,
+            "y_top": 39,
+            "y_bottom": 50
+        }
+    ],
+    "map_portals": [
+        {
+            "x": 147,
+            "y": 38,
+            "to_map": "Weathered_Land_Of_Happines"
+        }
+    ],
+    "spawns": []
+}

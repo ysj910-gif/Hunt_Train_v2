@@ -12,12 +12,14 @@ class MapTab:
         self.map_creator = MapCreator(self.agent)
         
         self.frame = ttk.Frame(notebook)
-        notebook.add(self.frame, text="Map & AI Model")
+        notebook.add(self.frame, text="Map Tool")
         
         self.map_offset_x = 0
         self.map_offset_y = 0
         
         self._setup_ui()
+
+        self._update_loop()
 
     def _setup_ui(self):
         # 1. 맵 로드 (기존 코드 유지)
@@ -41,22 +43,7 @@ class MapTab:
         ttk.Button(btn_pad, text="▶", width=3, command=lambda: self.adjust_offset(1, 0)).grid(row=1, column=2)
         ttk.Button(offset_frame, text="Reset", command=lambda: self.adjust_offset(0, 0, reset=True)).pack(pady=2)
 
-        # 3. AI Models (LSTM + Physics)
-        model_frame = ttk.LabelFrame(self.frame, text="AI Models")
-        model_frame.pack(fill="x", pady=5)
-        
-        # [기존] LSTM
-        self.lbl_lstm = ttk.Label(model_frame, text="LSTM: Not Loaded", foreground="gray")
-        self.lbl_lstm.pack()
-        ttk.Button(model_frame, text="🧠 Load LSTM", command=self.load_lstm).pack(fill="x", padx=5, pady=2)
-
-        # [▼ 추가됨] Physics Engine
-        ttk.Separator(model_frame, orient='horizontal').pack(fill='x', pady=5) # 구분선
-        self.lbl_physics = ttk.Label(model_frame, text="Physics: Not Loaded", foreground="gray")
-        self.lbl_physics.pack()
-        ttk.Button(model_frame, text="⚛️ Load Physics", command=self.load_physics_model).pack(fill="x", padx=5, pady=2)
-
-    # 4. [신규 UI] 맵 제작 도구 (Map Creator)
+        # 3. 맵 제작 도구 (Map Creator)
         # ==========================================
         self._setup_creator_ui()
 
@@ -81,10 +68,23 @@ class MapTab:
         ttk.Label(info_grid, text="End Point:").grid(row=1, column=0, sticky="w")
         self.lbl_end_pos = ttk.Label(info_grid, text="Not Set", foreground="red")
         self.lbl_end_pos.grid(row=1, column=1, sticky="w", padx=5)
+        # ========================================================
+        # 1. Set Start / 2. Set End 버튼 영역
+        # ========================================================
+        btn_grid = ttk.Frame(creator_frame)
+        btn_grid.pack(fill="x", padx=5, pady=5)
+        
+        ttk.Button(btn_grid, text="1. Set Start", command=self.on_set_start).pack(side="left", expand=True, fill="x", padx=1)
+        ttk.Button(btn_grid, text="2. Set End", command=self.on_set_end).pack(side="left", expand=True, fill="x", padx=1)
 
+        
         # 3. [수정] 객체 추가 버튼 영역 (그리드로 변경하여 배치)
         add_frame = ttk.LabelFrame(creator_frame, text="Add Objects")
         add_frame.pack(fill="x", padx=5, pady=5)
+
+        # [신규] 맨 아래 발판 체크박스
+        self.var_is_bottom = tk.BooleanVar(value=False)
+        ttk.Checkbutton(add_frame, text="맨 아래 발판 (⬇️점프 불가)", variable=self.var_is_bottom).grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=2)
         
         # Row 0: 기본 구조물
         ttk.Button(add_frame, text="🧱 Platform", command=self.on_add_platform).grid(row=0, column=0, sticky="ew", padx=2, pady=2)
@@ -98,6 +98,23 @@ class MapTab:
         add_frame.columnconfigure(0, weight=1)
         add_frame.columnconfigure(1, weight=1)
 
+        # (4) [신규] 스폰 매니저
+        spawn_frame = ttk.LabelFrame(creator_frame, text="Spawn Manager (Auto Distribute)")
+        spawn_frame.pack(fill="x", padx=5, pady=5)
+        
+        input_frame = ttk.Frame(spawn_frame)
+        input_frame.pack(fill="x", pady=2)
+        ttk.Label(input_frame, text="Total Mob Count:").pack(side="left", padx=5)
+        
+        self.ent_spawn_count = ttk.Entry(input_frame, width=5)
+        self.ent_spawn_count.insert(0, "28") # Default
+        self.ent_spawn_count.pack(side="left")
+        
+        ttk.Button(input_frame, text="⚡ Generate", command=self.on_generate_spawns).pack(side="left", padx=5)
+        
+        ttk.Button(spawn_frame, text="❌ Add No-Spawn Zone (Here)", 
+                   command=self.on_add_no_spawn_zone).pack(fill="x", padx=5, pady=2)
+
         # 4. [신규] 실행 취소 버튼
         ttk.Button(creator_frame, text="↩️ Undo Last Action", command=self.on_undo).pack(fill="x", padx=5, pady=2)
 
@@ -109,7 +126,14 @@ class MapTab:
         ttk.Separator(creator_frame, orient='horizontal').pack(fill='x', pady=5)
         ttk.Button(creator_frame, text="💾 Save New Map JSON", command=self.on_save_map).pack(fill="x", padx=5, pady=5)
 
-    # --- Event Handlers (UI Logic) ---
+    def _update_loop(self):
+        """실시간 좌표 갱신 (100ms 간격)"""
+        # 탭(프레임)이 살아있을 때만 동작
+        if self.frame.winfo_exists():
+            pos = self.map_creator.get_current_pos()
+            self.lbl_current_pos.config(text=f"Last Known Pos: {pos}")
+            # 100ms 뒤에 다시 자기 자신 호출 (재귀적 루프)
+            self.frame.after(100, self._update_loop)
 
     # --- Event Handlers (UI Logic) ---
 
@@ -155,17 +179,46 @@ class MapTab:
             self.lbl_platform_count.config(text=f"Objects: {count}")
 
     def on_add_platform(self):
-        """발판 추가 버튼 핸들러 (수정됨)"""
-        if not self.map_creator.is_ready_to_add():
-            messagebox.showerror("Error", "시작점과 종료점을 모두 설정해야 합니다.")
-            return
-
-        success, new_plat = self.map_creator.add_platform()
+        """발판 추가 버튼 핸들러 (맨 아래 발판 옵션 적용)"""
+        # 체크박스 값 가져오기 (UI에 self.var_is_bottom이 정의되어 있어야 함)
+        is_bottom = self.var_is_bottom.get()
+        
+        success, res = self.map_creator.add_platform(is_bottom=is_bottom)
         if success:
             self._update_status_ui()
-            print(f"[MapTab] Platform Added: {new_plat}")
+            print(f"[MapTab] Platform Added: {res}")
         else:
-             messagebox.showwarning("Error", new_plat)
+            messagebox.showwarning("Error", res)
+
+    def on_generate_spawns(self, silent=False):
+        """스폰 포인트 생성 및 재분배"""
+        try:
+            count = int(self.ent_spawn_count.get())
+            success, msg = self.map_creator.generate_spawns(count)
+            if success:
+                self._update_status_ui()
+                # silent=True일 경우 메시지 창 생략 (자동 재배치용)
+                if not silent:
+                    messagebox.showinfo("Spawns", msg)
+            else:
+                if not silent:
+                    messagebox.showerror("Error", msg)
+        except ValueError:
+            messagebox.showerror("Error", "몬스터 수에 숫자를 입력하세요.")
+
+    def on_add_no_spawn_zone(self):
+        """[신규] 스폰 제외 구역 추가 (현재 위치 기준)"""
+        # 1. 금지 구역 추가 (좌우 50px)
+        success, msg = self.map_creator.add_no_spawn_zone(radius=50)
+        
+        if success:
+            # 2. 성공 시 즉시 몬스터 재배치 (조용히 실행)
+            self.on_generate_spawns(silent=True)
+            
+            # 3. 결과 알림
+            messagebox.showinfo("Zone Added", f"{msg}\n\n해당 구역을 피해 몬스터가 재배치되었습니다.")
+        else:
+            messagebox.showwarning("Warning", msg)
 
     def on_add_portal(self):
         """[신규] 포탈 추가 버튼 핸들러"""
@@ -212,10 +265,16 @@ class MapTab:
                 messagebox.showerror("Error", res)
 
     def on_undo(self):
-        """[신규] 실행 취소 버튼 핸들러"""
+        """실행 취소 (금지 구역 취소 시 스폰 복구 포함)"""
         success, msg = self.map_creator.undo_last_action()
+        
         if success:
             self._update_status_ui()
+            
+            if "no_spawn" in msg:
+                self.on_generate_spawns(silent=True)
+                msg += "\n(스폰 포인트가 빈 자리에 다시 채워졌습니다.)"
+                
             messagebox.showinfo("Undo", msg)
         else:
             messagebox.showwarning("Undo", msg)
@@ -257,31 +316,6 @@ class MapTab:
                     self.save_callback(map_path=path)
             else:
                 messagebox.showerror("에러", "맵 로드 실패")
-
-    def load_lstm(self):
-        path = filedialog.askopenfilename(filetypes=[("PyTorch Model", "*.pth")])
-        if path:
-            if self.agent.model_loader.load_model(path):
-                self.lbl_lstm.config(text=os.path.basename(path), foreground="blue")
-                # [신규] 설정 저장 호출
-                if self.save_callback: 
-                    self.save_callback(model_path=path)
-            else:
-                messagebox.showerror("에러", "LSTM/GRU 모델 로드 실패")
-
-    def load_physics_model(self):
-        path = filedialog.askopenfilename(filetypes=[("PyTorch Model", "*.pth")])
-        if path:
-            if hasattr(self.agent, 'physics_engine') and self.agent.physics_engine:
-                if self.agent.physics_engine.load_model(path):
-                    if hasattr(self, 'lbl_physics'):
-                        self.lbl_physics.config(text=os.path.basename(path), foreground="blue")
-                    # [신규] 설정 저장 호출
-                    if self.save_callback: 
-                        self.save_callback(physics_path=path)
-                    return
-            
-            messagebox.showerror("에러", "물리 엔진 로드 실패\n(BotAgent 초기화를 확인하세요)")
 
     def adjust_offset(self, dx, dy, reset=False):
         # (기존 코드 유지)

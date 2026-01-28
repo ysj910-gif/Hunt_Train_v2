@@ -1,5 +1,5 @@
 {
-    "last_job": "Kinesis",
+    "last_job": "Bowmaster",
     "map_offset_x": -10,
     "map_offset_y": 0,
     "minimap_roi": [
@@ -102,7 +102,7 @@
             ]
         }
     },
-    "last_map_path": "C:/Users/ysj92/OneDrive/바탕 화면 ★/[Code]/Maple_Arduino/Hunt_train/Corrected_Royal_Library_6.json",
-    "last_lstm_path": "C:/Users/ysj92/OneDrive/바탕 화면 ★/[Code]/Maple_Arduino/Hunt_train/train/best_gru_model_boost.pth",
-    "last_rf_path": "C:/Users/ysj92/OneDrive/바탕 화면 ★/[Code]/Maple_Arduino/Hunt_train/train/physics_hybrid_model.pth"
+    "last_map_path": "",
+    "last_lstm_path": "",
+    "last_rf_path": ""
 }

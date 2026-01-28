@@ -1,0 +1,13 @@
+# Python 캐시 파일 무시 (필수)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 로그 데이터 파일 무시 (선택 사항)
+*.csv
+*.log
+
+# 가상환경 폴더 무시 (사용 중이라면)
+venv/
+env/
+.env

@@ -9,6 +9,7 @@ from modules.job_manager import JobManager
 from ui.tabs.skill_tab import SkillTab
 from ui.tabs.map_tab import MapTab
 from ui.tabs.simulation_tab import SimulationTab
+from ui.tabs.engine_tab import EngineTab  # [추가]
 from ui.components.status_panel import StatusPanel  # [신규 추가]
 from ui.components.roi_selector import ROISelector
 from ui.components.visualizer import Visualizer
@@ -34,6 +35,7 @@ class MainWindow:
         self.skill_tab = None
         self.map_tab = None
         self.simulation_tab = None  # [추가] 변수 초기화
+        self.engine_tab = None
         self.status_panel = None # [신규]
         self.sim_mode = None # 시뮬레이션 모드 객체
         self.is_simulating = False
@@ -109,6 +111,8 @@ class MainWindow:
         
         # [수정] MapTab에도 save_settings 콜백 전달
         self.map_tab = MapTab(self.tabs, self.agent, self.save_settings)
+
+        self.engine_tab = EngineTab(self.tabs, self.agent, self.save_settings)
 
         self.simulation_tab = SimulationTab(self.tabs, self) 
         self.tabs.add(self.simulation_tab, text="🧪 Simulation")
@@ -211,7 +215,7 @@ class MainWindow:
                         self.canvas.image = tk_img
 
         self.root.after(30, self.update_ui_loop)
-        
+
     def find_window_action(self):
         if self.agent.vision.find_window():
             messagebox.showinfo("성공", "창을 찾았습니다.")
@@ -490,6 +494,13 @@ class MainWindow:
             if self.map_tab:
                 self.map_tab.update_info(
                     map_path=self.cur_map_path,
+                    lstm_path=self.cur_lstm_path,
+                    rf_path=self.cur_rf_path
+                )
+
+            # EngineTab은 AI 모델 정보 업데이트
+            if self.engine_tab:
+                self.engine_tab.update_info(
                     lstm_path=self.cur_lstm_path,
                     rf_path=self.cur_rf_path
                 )

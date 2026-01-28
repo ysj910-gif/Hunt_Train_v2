@@ -1,0 +1,1 @@
+timestamp,scenario,state,key_pressed,player_x,player_y,vx,vy,ax,ay,is_ground,is_wall_left,is_wall_right,is_ladder,air_timeentropy,platform_id

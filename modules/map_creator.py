@@ -17,6 +17,8 @@ class MapCreator:
         self.new_portals = []   # 신규: 포탈 리스트
         self.new_ropes = []     # 신규: 밧줄 리스트
         self.new_map_portals = []  # [신규] 맵 이동 포탈 저장소
+        self.new_spawns = [] 
+        self.no_spawn_zones = []
         
         # [실행 취소 스택] (타입, 객체) 튜플을 저장하여 순서대로 취소
         self.action_history = []
@@ -101,6 +103,54 @@ class MapCreator:
         
         logger.info(f"[MapCreator] Platform Added: {new_plat}")
         return True, new_plat
+    
+    def generate_spawns(self, total_monster_count):
+        if not self.new_platforms:
+            return False, "발판이 없습니다."
+
+        # 1. 스폰 가능한 발판만 필터링 및 총 길이 계산
+        valid_platforms = [p for p in self.new_platforms if p.get("allow_spawn", True)]
+        if not valid_platforms:
+            return False, "스폰 가능한 발판이 없습니다."
+
+        total_length = sum((p["x_end"] - p["x_start"]) for p in valid_platforms)
+        if total_length == 0:
+            return False, "발판 길이 합이 0입니다."
+
+        self.new_spawns = [] # 기존 스폰 초기화
+        
+        # 2. 각 발판별 비례 배분 및 배치
+        current_count = 0
+        
+        for i, plat in enumerate(valid_platforms):
+            p_len = plat["x_end"] - plat["x_start"]
+            
+            # 비례 배분 (마지막 발판에서 남은 수량 보정)
+            if i == len(valid_platforms) - 1:
+                count = total_monster_count - current_count
+            else:
+                ratio = p_len / total_length
+                count = int(total_monster_count * ratio)
+            
+            current_count += count
+            
+            # 발판 내 균등 배치
+            if count > 0:
+                # 양 끝 10% 여유를 두고 배치
+                margin = p_len * 0.1
+                usable_len = p_len - (2 * margin)
+                step = usable_len / (count + 1) if count > 0 else 0
+                
+                start_x = plat["x_start"] + margin
+                
+                for k in range(1, count + 1):
+                    sx = int(start_x + (step * k))
+                    sy = plat["y"] - 10 # 발판 약간 위
+                    self.new_spawns.append({"x": sx, "y": sy})
+
+        msg = f"총 {len(self.new_spawns)}개의 스폰 포인트가 {len(valid_platforms)}개 발판에 배치되었습니다."
+        logger.info(msg)
+        return True, msg
 
     def undo_last_platform(self):
         """마지막에 추가한 발판 취소"""

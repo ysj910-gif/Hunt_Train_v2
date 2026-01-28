@@ -26,6 +26,9 @@ INSTALL_SKILL_NAME = "fountain" # 설치기 스킬 이름 (키 매핑 조회용)
 # [물리 엔진 설정]
 PHYSICS_ACTION_DIM_DEFAULT = 16 # 물리 모델 기본 행동 차원 수
 
+# [캐릭터 설정]
+CURRENT_JOB = "Kinesis"  # jobs.json에 정의된 직업 이름과 일치해야 함
+
 # [기본 키 매핑 (Key Mappings Fallback)]
 # 사용자가 별도 설정을 하지 않았을 때 사용될 기본 키
 DEFAULT_KEYS = {

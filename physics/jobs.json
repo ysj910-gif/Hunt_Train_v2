@@ -3,12 +3,9 @@
         "key_mapping": {
             "main": "ctrl",
             "jump": "alt",
-            "teleport": "shift",
             "ultimate": "6",
             "fountain": "4",
-            "rope": "c",
-            "up_jump": "up",
-            "down_jump": "down"
+            "rope": "c"
         },
         "skill_settings": {
             "fountain": {
@@ -20,15 +17,5 @@
                 "type": "buff"
             }
         }
-    },
-    "Bowmaster": {
-        "key_mapping": {
-            "main": "ctrl",
-            "jump": "alt",
-            "ultimate": "6",
-            "fountain": "4",
-            "rope": "c"
-        },
-        "skill_settings": {}
     }
 }
