@@ -1,5 +1,7 @@
+#physics\physics_trainer
+
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog # [추가] 입력 팝업용
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import threading
 import time
 import sys
@@ -7,6 +9,7 @@ import os
 import json
 import traceback
 import logging
+import cv2  # [추가] OpenCV
 
 # 프로젝트 루트 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # [필수 모듈 임포트]
 try:
     from core.bot_agent import BotAgent
-    from utils.logger import logger
+    from utils.logger import logger, trace_logic  # [추가] trace_logic 임포트
     from modules.vision_system import VisionSystem
     from modules.scanner import GameScanner
     from core.action_handler import ActionHandler
@@ -23,6 +26,7 @@ try:
     from engine.physics_engine import PhysicsEngine
     from core.decision_maker import DecisionMaker  
     from core.data_recorder import DataRecorder
+    from ui.components.roi_selector import ROISelector # [추가] ROI 선택기 임포트
 except ImportError as e:
     print(f"❌ 모듈 임포트 오류: {e}")
 
@@ -116,19 +120,29 @@ class MapVisualizer(tk.Canvas):
         x2, y2 = self._to_canvas(x_end, y + 5)
         self.target_id = self.create_rectangle(x1, y1, x2, y2, outline="green", width=3, dash=(4, 2))
 
+    
 
 class PhysicsTrainerVisualApp:
     def __init__(self, root):
         self.root = root
         self.root.title("🍁 Maple Physics Trainer (Repeat Control)")
-        self.root.geometry("1150x750")
+        self.root.geometry("1150x850") # [수정] 높이 약간 증가
+        
+        # [수정] Vision 및 Scanner 미리 초기화 (ROI 설정을 위해)
+        self.vision = VisionSystem()
+        self.scanner = GameScanner()
         
         self.agent = None
         self.is_running = False
+        self.is_paused = False
+
+        self.current_loop_idx = 0 
+        self.total_repeat_count = 0
+
         self.map_path = tk.StringVar()
         self.instruction_text = tk.StringVar(value="맵 파일을 로드해주세요.")
         
-        # [수정] 미션 목록 (ID, 이름, 기본 반복 횟수)
+        # 미션 목록 정의
         self.missions_data = [
             ("M1", "마찰력 테스트 (우)", 5),
             ("M2", "마찰력 테스트 (좌)", 5),
@@ -140,17 +154,18 @@ class PhysicsTrainerVisualApp:
             ("M8", "자유 낙하 (발판 이탈)", 15),
             ("M9", "하향 점프 (Down Jump)", 15),
             ("M10", "급정거/방향전환", 15),
-            ("M11", "공중 역추진 (Air Brake)", 15),  # 점프 중 반대키 입력
-            ("M12", "공격 관성 (이동 중 공격)", 15), # 이동 중 공격 키 입력
-            ("M13", "로프 매달리기/이동", 10),       # 로프 물리 확인
-            ("M14", "로프 이탈 점프", 10)            # 로프에서 점프
-                ]
+            ("M11", "공중 역추진 (Air Brake)", 15),
+            ("M12", "공격 관성 (이동 중 공격)", 15),
+            ("M13", "로프 매달리기/이동", 10),
+            ("M14", "로프 이탈 점프", 10),
+            ("M15", "상향 점프 (제자리)", 30),   # [추가] 제자리 상향 점프
+            ("M16", "상향 점프 (이동)", 30)
+        ]
         
-        # 횟수 관리용 딕셔너리
         self.mission_reps = {mid: default_reps for mid, _, default_reps in self.missions_data}
-        
+
         self._setup_ui()
-        
+
     def _setup_ui(self):
         # 1. 상단 설정
         top_frame = ttk.Frame(self.root, padding=10)
@@ -158,6 +173,14 @@ class PhysicsTrainerVisualApp:
         ttk.Label(top_frame, text="맵 파일:").pack(side="left")
         ttk.Entry(top_frame, textvariable=self.map_path, width=40).pack(side="left", padx=5)
         ttk.Button(top_frame, text="📂 열기", command=self._browse_map).pack(side="left")
+        
+        # [추가] ROI 설정 버튼
+        ttk.Separator(top_frame, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Button(top_frame, text="🗺️ 미니맵 설정", command=self._set_minimap_roi).pack(side="left", padx=5)
+        
+        # [추가] 창 위치 갱신 버튼
+        ttk.Button(top_frame, text="🔄 창 위치 갱신", command=self._refresh_window_position).pack(side="left", padx=5)
+        
         ttk.Button(top_frame, text="🛑 중지", command=self._stop_training).pack(side="right")
 
         # 2. 중단 (맵 + 체크리스트)
@@ -170,11 +193,9 @@ class PhysicsTrainerVisualApp:
         self.canvas = MapVisualizer(map_frame, bg="#f5f5f5")
         self.canvas.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # [수정] 리스트 프레임 너비 증가
-        list_frame = ttk.LabelFrame(mid_frame, text="📋 To-Do Check List (Double-click to Edit)", width=320)
+        list_frame = ttk.LabelFrame(mid_frame, text="📋 To-Do Check List", width=320)
         list_frame.pack(side="right", fill="y")
         
-        # [수정] 컬럼에 'reps' 추가
         cols = ("status", "name", "reps")
         self.tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=20)
         
@@ -187,11 +208,8 @@ class PhysicsTrainerVisualApp:
         self.tree.column("reps", width=50, anchor="center")
         
         self.tree.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # 더블 클릭 이벤트 바인딩 (횟수 수정)
         self.tree.bind("<Double-1>", self._on_tree_double_click)
         
-        # 초기 데이터 삽입
         for mid, name, reps in self.missions_data:
             self.tree.insert("", "end", iid=mid, values=("⬜", name, f"{reps}회"))
 
@@ -203,8 +221,48 @@ class PhysicsTrainerVisualApp:
                                          font=("Helvetica", 16, "bold"), foreground="blue", anchor="center")
         self.lbl_instruction.pack(fill="x", pady=(0, 10))
         
-        self.btn_start = ttk.Button(bottom_frame, text="🚀 훈련 시작", command=self._start_training, state="disabled")
-        self.btn_start.pack(fill="x", ipady=5)
+        # [추가] 컨트롤 패널
+        ctrl_frame = ttk.Frame(bottom_frame)
+        ctrl_frame.pack(fill="x")
+        
+        # [수정] 버튼 3개 배치 (시작 / 일시정지 / 이전삭제)
+        self.btn_start = ttk.Button(ctrl_frame, text="🚀 훈련 시작", command=self._start_training, state="disabled")
+        self.btn_start.pack(side="left", fill="x", expand=True, ipady=5, padx=2)
+        
+        self.btn_pause = ttk.Button(ctrl_frame, text="⏸️ 일시정지", command=self._toggle_pause, state="disabled")
+        self.btn_pause.pack(side="left", fill="x", expand=True, ipady=5, padx=2)
+        
+        self.btn_undo = ttk.Button(ctrl_frame, text="↩️ 최근 데이터 삭제", command=self._undo_last_data, state="disabled")
+        self.btn_undo.pack(side="left", fill="x", expand=True, ipady=5, padx=2)
+        
+        # [추가] 실시간 화면 보기 체크박스
+        self.show_vision_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(ctrl_frame, text="📸 실시간 인식(Vision) 확인", variable=self.show_vision_var).pack(side="right", padx=10)
+
+    def _refresh_window_position(self):
+        if self.vision.find_window():
+            # 창을 다시 찾으면 캡처 영역(capture_area)이 갱신됨
+            rect = self.vision.capture_area
+            messagebox.showinfo("갱신 완료", f"메이플스토리 창을 다시 찾았습니다.\n위치: {rect}")
+            # 필요하다면 ROI 재설정 알림을 줄 수도 있음
+        else:
+            messagebox.showerror("실패", "메이플스토리 창을 찾을 수 없습니다.\n게임을 실행했는지 확인해주세요.")
+
+    # [추가] 미니맵 ROI 설정 메서드
+    def _set_minimap_roi(self):
+        # Vision System이 창을 못 찾으면 먼저 찾게 함
+        if not self.vision.find_window():
+            messagebox.showwarning("경고", "메이플스토리 창을 찾을 수 없습니다.\n게임을 실행해주세요.")
+            return
+
+        # ROISelector가 'agent.vision' 구조를 원하므로 Proxy 객체 생성
+        class AgentProxy:
+            def __init__(self, vision):
+                self.vision = vision
+        
+        # 팝업 실행
+        ROISelector(self.root, AgentProxy(self.vision), "minimap")
+        logger.info("미니맵 설정 팝업 열림")
 
     # [추가] 리스트 더블 클릭 시 횟수 수정
     def _on_tree_double_click(self, event):
@@ -268,19 +326,73 @@ class PhysicsTrainerVisualApp:
                 traceback.print_exc()
                 messagebox.showerror("맵 로드 실패", f"오류: {e}")
 
+    def _toggle_pause(self):
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.btn_pause.config(text="▶️ 다시 시작 (재개)")
+            self.instruction_text.set("⏸️ 훈련이 일시정지 되었습니다.")
+        else:
+            self.btn_pause.config(text="⏸️ 일시정지")
+            self.instruction_text.set("훈련을 재개합니다...")
+
+    # [추가] 최근 데이터 삭제 메서드
+    def _undo_last_data(self):
+        if not self.agent or not self.agent.recorder:
+            messagebox.showwarning("경고", "레코더가 초기화되지 않았습니다.")
+            return
+            
+        last_file = self.agent.recorder.last_filepath
+        
+        if last_file and os.path.exists(last_file):
+            confirm = messagebox.askyesno("삭제/되돌리기 확인", 
+                f"가장 최근 기록을 삭제하고\n이번 회차({self.current_loop_idx}회)를 다시 수행하시겠습니까?\n\n파일: {os.path.basename(last_file)}")
+            
+            if confirm:
+                try:
+                    # 1. 파일 삭제
+                    if self.agent.recorder.file and not self.agent.recorder.file.closed:
+                        self.agent.recorder.close()
+                    os.remove(last_file)
+                    print(f"🗑️ 파일 삭제 완료: {last_file}")
+                    
+                    # 2. [핵심] 루프 카운트 되돌리기 (0보다 클 때만)
+                    if self.current_loop_idx > 0:
+                        self.current_loop_idx -= 1
+                        self._update_gui(f"↩️ {self.current_loop_idx + 1}회차부터 다시 시작합니다...")
+                    else:
+                         messagebox.showinfo("알림", "현재 미션의 첫 번째 데이터 이전입니다.\n파일은 삭제되었으나 미션 단계는 유지됩니다.")
+
+                except Exception as e:
+                    messagebox.showerror("오류", f"작업 실패: {e}")
+        else:
+            messagebox.showinfo("알림", "삭제할 최근 기록 파일이 없습니다.")
+
     def _start_training(self):
         self.is_running = True
+        self.is_paused = False  # 초기화
+        
+        # [수정] 시작 버튼은 끄고, 제어 버튼들은 켜기
         self.btn_start.config(state="disabled")
+        
+        # 아래 두 줄이 없어서 버튼이 계속 비활성화 상태였던 것입니다.
+        self.btn_pause.config(state="normal", text="⏸️ 일시정지")
+        self.btn_undo.config(state="normal")
+        
         t = threading.Thread(target=self._training_routine)
         t.daemon = True
         t.start()
 
     def _stop_training(self):
         self.is_running = False
+        self.is_paused = False
         if self.agent:
             self.agent.stop()
         self.instruction_text.set("훈련이 중지되었습니다.")
+        
+        # [수정] 버튼 상태 원상복구
         self.btn_start.config(state="normal")
+        self.btn_pause.config(state="disabled", text="⏸️ 일시정지")
+        self.btn_undo.config(state="disabled") # 훈련 종료 후 삭제 막으려면 disabled, 아니면 normal
 
     def _update_gui(self, text, target_area=None):
         self.instruction_text.set(text)
@@ -291,7 +403,13 @@ class PhysicsTrainerVisualApp:
                 self.canvas.delete(self.canvas.target_id)
                 self.canvas.target_id = None
 
+    @trace_logic
     def _get_player_pos(self):
+        # 1. Scanner가 직접 가지고 있는 위치 우선 (실시간성 높음)
+        if self.scanner and self.scanner.last_player_pos != (0,0):
+             return self.scanner.last_player_pos
+             
+        # 2. Agent를 통한 데이터 접근
         if not self.agent or not self.agent.scanner:
             return None
         if hasattr(self.agent.scanner, 'player_pos'): return self.agent.scanner.player_pos
@@ -304,8 +422,7 @@ class PhysicsTrainerVisualApp:
         try:
             print(">>> [INIT] Modules assembly...")
             
-            vision_system = VisionSystem()
-            scanner = GameScanner()
+            # [수정] 이미 생성된 self.vision, self.scanner 사용
             action_handler = ActionHandler() 
             map_processor = MapProcessor()
             physics_engine = PhysicsEngine()
@@ -314,11 +431,11 @@ class PhysicsTrainerVisualApp:
                 physics_engine.load_model("physics_hybrid_model.pth")
             
             path_finder = PathFinder(map_processor, physics_engine)
-            recorder = DataRecorder("Session_Log")
-            
+            recorder = DataRecorder(map_processor, "Session_Log")  
+
             self.agent = BotAgent(
-                vision=vision_system,
-                scanner=scanner,
+                vision=self.vision,     # [연결]
+                scanner=self.scanner,   # [연결]
                 action_handler=action_handler,
                 map_processor=map_processor,
                 path_finder=path_finder,
@@ -339,22 +456,22 @@ class PhysicsTrainerVisualApp:
             t_agent.daemon = True
             t_agent.start()
 
+            # 시각화 루프 시작 (훈련 시작 시점에 확실히 트리거)
             self.root.after(100, self._visualizer_loop)
 
+            # ... (미션 수행 로직은 동일하므로 생략하거나 유지) ...
             platforms = self.agent.map_processor.platforms
             if not platforms: raise ValueError("No platforms found.")
-
+            
+            # --- (이하 미션 코드는 원본 유지) ---
             run_plat = max(platforms, key=lambda p: p['x_end'] - p['x_start'])
             jump_plats = sorted(platforms, key=lambda p: p['y'])
             main_jump_plat = jump_plats[0] if jump_plats else run_plat
-
-            # === [훈련 시작] ===
+            
             self._update_gui("⚠️ 훈련 세션이 시작되었습니다.")
             time.sleep(2)
-
-            # [수정] 각 미션마다 self.mission_reps에서 횟수를 가져와 실행
             
-            # 1. 마찰력 (우)
+            # 첫번째 미션
             mid = "M1"
             self._update_mission_status(mid, "active")
             self._mission_move_to(run_plat, "middle", "마찰력 테스트 (우)\n중앙으로 이동하세요.")
@@ -456,7 +573,9 @@ class PhysicsTrainerVisualApp:
             self._update_mission_status(mid, "done")
 
             # --- 로프/사다리 데이터 확인 ---
-            ropes = self.agent.map_processor.map_data.get("ropes", [])
+            ropes = []
+            if self.canvas.map_data:
+                ropes = self.canvas.map_data.get("ropes", [])
             target_rope = ropes[0] if ropes else None
 
             if target_rope:
@@ -491,6 +610,25 @@ class PhysicsTrainerVisualApp:
             else:
                 print("⚠️ 맵 데이터에 'ropes'가 없어 로프 미션을 건너뜁니다.")
 
+            mid = "M15"
+            self._update_mission_status(mid, "active")
+            # 넓은 발판(run_plat) 중앙으로 이동
+            self._mission_move_to(run_plat, "middle", "상향 점프 (제자리) 테스트\n발판 중앙으로 이동하세요.")
+            # Action: 제자리에서 윗점프
+            self._mission_action("UpJump_Stationary", "윗방향키 + 점프 (상향 점프)!", 
+                                 repeat=self.mission_reps[mid], wait=2.5)
+            self._update_mission_status(mid, "done")
+
+            # [추가] 16. 상향 점프 (이동)
+            # 좌우 대칭이므로 한 방향(오른쪽)만 수행
+            mid = "M16"
+            self._update_mission_status(mid, "active")
+            self._mission_move_to(run_plat, "left_edge", "상향 점프 (이동) 테스트\n발판 왼쪽 끝으로 이동하세요.")
+            # Action: 오른쪽으로 달리면서 윗점프
+            self._mission_action("UpJump_Move_Right", "오른쪽으로 달리면서 윗방향키 + 점프!", 
+                                 duration=2.0, repeat=self.mission_reps[mid], wait=2.5)
+            self._update_mission_status(mid, "done")
+
         except Exception as e:
             print("❌ 훈련 중 오류 발생:")
             traceback.print_exc()
@@ -499,10 +637,53 @@ class PhysicsTrainerVisualApp:
     def _visualizer_loop(self):
         if not self.is_running: return
         try:
+            # 여기서는 float 좌표를 그대로 받아옴
             pos = self._get_player_pos()
+            
+            # [수정 1] 캔버스 업데이트 시 int 변환 불필요 (Tkinter는 float도 처리 가능하지만 안전하게 int 권장)
             if pos:
                 self.canvas.update_player(pos[0], pos[1])
         except Exception: pass
+
+        if self.show_vision_var.get():
+            try:
+                if not self.vision.window_found:
+                    self.vision.find_window()
+                
+                frame = self.vision.capture()
+                if frame is not None:
+                    if self.vision.minimap_roi:
+                        self.scanner.set_rois(self.vision.minimap_roi, self.vision.kill_roi)
+                    
+                    cx, cy = self.scanner.find_player(frame)
+                    
+                    # 그리기 (OpenCV)
+                    if self.vision.minimap_roi:
+                        mx, my, mw, mh = self.vision.minimap_roi
+                        cv2.rectangle(frame, (mx, my), (mx+mw, my+mh), (0, 255, 0), 2)
+                        
+                        if cx > 0 and cy > 0:
+                            # [수정 2] 화면에 그릴 때만 int()로 변환하여 소수점 버림
+                            # (데이터 기록이나 물리 엔진에는 소수점 그대로 전달됨)
+                            screen_x = int(mx + cx)
+                            screen_y = int(my + cy)
+                            
+                            cv2.circle(frame, (screen_x, screen_y), 5, (0, 0, 255), -1)
+                            # 텍스트에는 소수점 둘째 자리까지 표시
+                            cv2.putText(frame, f"Pos: {cx:.2f},{cy:.2f}", (screen_x+10, screen_y), 
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+                    cv2.imshow("Bot Vision Debug", frame)
+                    cv2.waitKey(1)
+            except Exception as e:
+                print(f"Vision Error: {e}")
+        else:
+            # 체크박스 끄면 창 닫기
+            try:
+                if cv2.getWindowProperty("Bot Vision Debug", 0) >= 0:
+                    cv2.destroyWindow("Bot Vision Debug")
+            except: pass
+
         self.root.after(100, self._visualizer_loop)
 
     def _mission_move_to(self, plat, position, msg):
@@ -536,19 +717,47 @@ class PhysicsTrainerVisualApp:
         time.sleep(1.0)
 
     def _mission_action(self, scenario_name, msg, duration=0, repeat=1, wait=2.0):
-        # repeat 인자가 0 이하로 들어오면 1회로 보정
-        repeat = max(1, repeat)
+        # 1. 상태 초기화
+        self.current_loop_idx = 0
+        self.total_repeat_count = max(1, repeat)
         
-        for i in range(repeat):
+        # 2. While 루프로 변경 (Undo 기능을 위해)
+        while self.current_loop_idx < self.total_repeat_count:
+            i = self.current_loop_idx # 현재 회차 (0부터 시작)
+
+            # ----------------------------------
+            # (A) 훈련 중지/일시정지 체크 구역
+            # ----------------------------------
             if not self.is_running: return
+            while self.is_paused:
+                if not self.is_running: return
+                time.sleep(0.5)
+
+            # ----------------------------------
+            # (B) 카운트다운
+            # ----------------------------------
             for c in range(3, 0, -1):
-                self._update_gui(f"{msg}\n({i+1}/{repeat}) ⏳ {c}...", None)
+                # 카운트다운 중에도 Index가 바뀌거나(Undo) 일시정지될 수 있음
+                while self.is_paused: 
+                    time.sleep(0.5)
+                if not self.is_running: return
+                
+                # GUI 업데이트 (현재 회차 표시)
+                # i+1을 표시하지만, 사용자가 Undo를 누르면 self.current_loop_idx가 줄어들어
+                # 다음 루프 때 숫자가 줄어든 상태로 다시 출력됨.
+                current_display_idx = self.current_loop_idx + 1
+                self._update_gui(f"{msg}\n({current_display_idx}/{self.total_repeat_count}) ⏳ {c}...", None)
                 time.sleep(1)
             
-            self._update_gui(f"🔥 GO! ({i+1}/{repeat})", None)
+            # ----------------------------------
+            # (C) 액션 실행 (기록 시작)
+            # ----------------------------------
+            current_display_idx = self.current_loop_idx + 1
+            self._update_gui(f"🔥 GO! ({current_display_idx}/{self.total_repeat_count})", None)
             
             if self.agent and self.agent.recorder:
-                 mission_filename = f"Trainer_{scenario_name}_{i+1}"
+                 # 파일명에 회차 번호 포함
+                 mission_filename = f"Trainer_{scenario_name}_{current_display_idx}"
                  self.agent.recorder.open(mission_filename)
                  self.agent.is_recording = True
 
@@ -557,12 +766,22 @@ class PhysicsTrainerVisualApp:
                 
             self._update_gui("🛑 멈추세요 (기록 중...)", None)
             
+            # ----------------------------------
+            # (D) 안정화 대기 및 기록 종료
+            # ----------------------------------
             self._wait_until_stopped(wait)
 
             if self.agent and self.agent.recorder:
                  self.agent.is_recording = False
                  self.agent.recorder.close()
-
+            
+            # ----------------------------------
+            # (E) 루프 인덱스 증가
+            # ----------------------------------
+            # 여기서 증가시키므로, 만약 위 과정 후 Undo를 누르면 
+            # self.current_loop_idx가 다시 1 줄어들어 while 조건문 안에서 다시 실행됨
+            self.current_loop_idx += 1
+            
     def _wait_until_stopped(self, timeout=2.0):
         start = time.time()
         last_pos = None

@@ -10,58 +10,64 @@ from utils.logger import logger
 
 class DataRecorder:
     def __init__(self, map_processor=None, filename_prefix="Physics_Record"):
-        """
-        :param map_processor: 지상/공중 여부를 판단하기 위한 MapProcessor 인스턴스 (필수)
-        :param filename_prefix: 저장될 파일의 접두사
-        """
         self.map_processor = map_processor
         
-        # 데이터 저장 폴더 생성
         if not os.path.exists("data"):
             os.makedirs("data")
-            
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.filepath = f"data/{filename_prefix}_{timestamp}.csv"
+
+        # 변수 초기화
+        self.file = None
+        self.writer = None
+        self.last_filepath = None 
         
-        self.file = open(self.filepath, "w", newline="", encoding="utf-8")
-        self.writer = csv.writer(self.file)
-        
-        # --- [물리 학습을 위한 확장 헤더 설정] ---
-        self.headers = [
-            "timestamp", 
-            "scenario",      # 실험 시나리오 (예: friction_test, jump_inertia)
-            "state",         # 봇 상태 (PHYSICS_TEST, IDLE 등)
-            "key_pressed",   # 입력 키 (action)
-            
-            # 위치 정보
-            "player_x", "player_y",
-            
-            # 물리 정보 (속도, 가속도, 상태) - 핵심 피처
-            "vx", "vy",          # 현재 속도 (pixels/sec)
-            "ax", "ay",          # 현재 가속도 (pixels/sec^2)
-            "is_ground",      # 바닥에 닿았는지
-            "is_wall_left",   # 왼쪽 벽에 붙었는지
-            "is_wall_right",  # 오른쪽 벽에 붙었는지
-            "is_ladder",      # 사다리/줄에 매달렸는지 (완전 다른 물리 적용)
-            "air_time"   # [추가] 공중에 떠 있는 시간 (초)
-            
-            # 기타 보조 정보
-            "entropy",       # 이미지 복잡도
-            "platform_id"    # 현재 밟고 있는 발판 ID (없으면 -1)
-        ]
-        self.writer.writerow(self.headers)
-        
-        # 물리 계산을 위한 이전 프레임 상태 저장 변수
+        # 물리 상태 변수 초기화
         self.prev_time = None
         self.prev_x = None
         self.prev_y = None
         self.prev_vx = 0.0
         self.prev_vy = 0.0
-        
-        # 현재 실험 시나리오 이름
         self.current_scenario = "None"
+        self.air_start_time = None
 
-        logger.info(f"✅ 물리 데이터 레코더 시작: {self.filepath}")
+        # [핵심] 중복 코드를 제거하고 open() 메서드 재사용
+        # 이렇게 하면 __init__ 호출 시에도 파일이 열리므로 기존 코드와 호환됩니다.
+        self.open(filename_prefix) 
+
+    def open(self, filename_prefix):
+        # 기존 파일 닫기 (self.file이 None이어도 안전하게 처리되도록 close 구현 필요)
+        self.close()
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.filepath = f"data/{filename_prefix}_{timestamp}.csv"
+        self.last_filepath = self.filepath # 생성된 파일을 마지막 파일로 기록
+        
+        try:
+            self.file = open(self.filepath, "w", newline="", encoding="utf-8")
+            self.writer = csv.writer(self.file)
+            
+            # 헤더 설정 (이곳 한 군데에서만 관리하면 됨)
+            self.headers = [
+                "timestamp", "scenario", "state", "key_pressed",
+                "player_x", "player_y",
+                "vx", "vy", "ax", "ay",
+                "is_ground", "is_wall_left", "is_wall_right", "is_ladder", "air_time",
+                "entropy", "platform_id"
+            ]
+            self.writer.writerow(self.headers)
+            logger.info(f"✅ 데이터 기록 시작: {self.filepath}")
+            
+        except Exception as e:
+            logger.error(f"파일 열기 실패: {e}")
+            self.file = None
+
+    def close(self):
+        # self.file이 존재하는지 확인 후 닫기
+        if hasattr(self, 'file') and self.file:
+            try:
+                self.file.close()
+            except: pass
+        self.file = None
+        self.writer = None
 
     def set_scenario(self, scenario_name):
         """현재 진행 중인 실험 시나리오 이름을 설정합니다."""
@@ -69,7 +75,7 @@ class DataRecorder:
             logger.info(f"🧪 실험 시나리오 변경: {self.current_scenario} -> {scenario_name}")
             self.current_scenario = scenario_name
 
-    def log_step(self, frame, player_pos, action, state):
+    def log_step(self, frame, player_pos, action, state, skill_status=None):
         """
         매 프레임의 데이터를 물리 정보와 함께 CSV에 기록합니다.
         
@@ -78,6 +84,9 @@ class DataRecorder:
         :param action: 수행한 키 입력 (String)
         :param state: 현재 봇 상태
         """
+        if not self.file or not self.writer:
+            return
+        
         try:
             current_time = time.time()
             px, py = player_pos if player_pos else (0, 0)
@@ -166,9 +175,3 @@ class DataRecorder:
         except Exception as e:
             # 기록 중 에러가 나도 봇이 멈추지 않도록 처리
             logger.error(f"Recording Error: {e}")
-
-    def close(self):
-        if self.file:
-            self.file.close()
-            self.file = None
-            logger.info("✅ 데이터 녹화 파일 저장 완료")

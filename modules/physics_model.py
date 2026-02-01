@@ -1,4 +1,4 @@
-# Hunt_Train_v2/modules/physics_model.py
+#modules/physics_model.py
 
 import torch
 import torch.nn as nn

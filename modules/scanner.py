@@ -55,20 +55,29 @@ class GameScanner:
             self.last_kill_roi = kill_roi
             self.last_roi_log_time = current_time
 
+    @trace_logic
     def find_player(self, frame):
-        """미니맵에서 플레이어(노란 점) 위치 찾기 - 기존 로직 복원"""
+        """
+        미니맵에서 플레이어(노란 점) 위치 찾기 - 서브픽셀 정밀도 적용
+        """
         if not self.minimap_roi:
             return 0, 0
 
         x, y, w, h = self.minimap_roi
         
-        # [수정] 기존 코드의 엄격한 범위 체크 복원
-        # ROI가 화면 밖으로 나가는 경우 방지
+        # 화면 범위 체크
         if x < 0 or y < 0 or x + w > frame.shape[1] or y + h > frame.shape[0]:
             return 0, 0
 
         minimap = frame[y:y+h, x:x+w]
-        hsv = cv2.cvtColor(minimap, cv2.COLOR_BGR2HSV)
+        
+        # [핵심 수정] 서브픽셀 인식을 위한 업스케일링 (4배 확대)
+        scale_factor = 4.0 
+        
+        # 보간법: CUBIC이나 LINEAR를 써야 경계면이 부드러워져 무게중심이 정밀해짐
+        upscaled = cv2.resize(minimap, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+        
+        hsv = cv2.cvtColor(upscaled, cv2.COLOR_BGR2HSV)
         
         # 노란색 범위 (기존 값 유지)
         lower = np.array([20, 100, 100])
@@ -81,13 +90,15 @@ class GameScanner:
             c = max(contours, key=cv2.contourArea)
             M = cv2.moments(c)
             if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
+                # [수정] int()로 자르지 않고 float 상태로 계산 후 스케일로 나눔
+                # 결과적으로 (12.5, 30.25) 같은 정밀 좌표를 얻음
+                cx = (M["m10"] / M["m00"]) / scale_factor
+                cy = (M["m01"] / M["m00"]) / scale_factor
+                
                 self.last_player_pos = (cx, cy)
                 return cx, cy
         
-        # [수정] 못 찾았을 경우, 기존 코드처럼 0, 0 반환 (혹은 마지막 위치 반환)
-        # 위치를 못 잡는 문제를 해결하기 위해 찾지 못하면 0,0을 리턴하여 재탐색 유도
+        # 못 찾으면 0, 0 반환
         return 0, 0
 
     def read_kill_count(self, frame):
