@@ -6,11 +6,12 @@ import json
 import ctypes
 import threading
 from typing import Callable, Tuple, Optional
-import serial 
+# import serial 
 from utils.logger import logger
 from utils.physics_utils import PhysicsUtils, MovementTracker
 from utils.logger import logger, trace_logic
-from utils.human_input import HumanInput 
+from utils.human_input import HumanInput
+from core.arduino_bridge import ArduinoBridge
 
 # --- Low Level Input Definition (Windows API) ---
 SendInput = ctypes.windll.user32.SendInput
@@ -62,7 +63,8 @@ class ActionHandler:
 
     def __init__(self, mode: str = "SOFTWARE", serial_port: str = None, physics_config_path: str = "physics_engine.json"):
         self.mode = mode.upper()
-        self.serial = None
+        # self.serial = None  <-- [삭제] ArduinoBridge로 대체
+        self.arduino = None # [추가] 브리지 인스턴스
         self._stop_event = threading.Event()
         
         # 물리 엔진 설정 로드
@@ -73,15 +75,15 @@ class ActionHandler:
         self.walk_acc = self.physics_data.get('walk_acceleration', 15.0)
         self.max_walk_speed = self.physics_data.get('max_walk_velocity', 125.0)
         
-        # 하드웨어 모드 초기화
+        # [수정] 하드웨어 모드 초기화 로직 변경
         if self.mode == "HARDWARE":
             if serial_port:
-                try:
-                    self.serial = serial.Serial(serial_port, 115200, timeout=0.1)
-                    logger.info(f"ActionHandler: Hardware Mode Initialized ({serial_port})")
-                except Exception as e:
-                    logger.error(f"Serial Connection Failed: {e}")
-                    self.mode = "SOFTWARE" 
+                logger.info(f"ActionHandler: Initializing Hardware Mode via {serial_port}...")
+                self.arduino = ArduinoBridge(serial_port)
+                # 연결 성공 여부 확인 (간단한 체크)
+                if not self.arduino.serial:
+                    logger.warning("Hardware initialization failed. Fallback to SOFTWARE.")
+                    self.mode = "SOFTWARE"
             else:
                 logger.warning("Serial Port not provided. Falling back to SOFTWARE mode.")
                 self.mode = "SOFTWARE"
@@ -128,41 +130,41 @@ class ActionHandler:
         x = Input(ctypes.c_ulong(1), ii_)
         SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
-    def _send_key_hardware(self, key_name: str, pressed: bool):
-        """Arduino Serial 통신 방식 (사용자 아두이노 코드 호환용)"""
-        if not self.serial: return
+    #def _send_key_hardware(self, key_name: str, pressed: bool):
+    #    """Arduino Serial 통신 방식 (사용자 아두이노 코드 호환용)"""
+    #    if not self.serial: return
         
         # 1. 아두이노가 기대하는 명령어: P(누름), R(뗌)
-        cmd = "P" if pressed else "R"
+    #    cmd = "P" if pressed else "R"
         
         # 2. 아두이노가 기대하는 포맷: 쉼표 없이 붙여서 전송 (예: "Pleft\n")
         # 제공해주신 아두이노 코드는 '\n'을 만나야 명령을 처리하므로 개행문자 추가 필수
-        payload = f"{cmd}{key_name}\n"
+    #    payload = f"{cmd}{key_name}\n"
         
-        try:
-            self.serial.write(payload.encode())
-        except Exception as e:
-            logger.error(f"Serial Write Error: {e}")
+    #    try:
+    #        self.serial.write(payload.encode())
+    #    except Exception as e:
+    #        logger.error(f"Serial Write Error: {e}")
 
     # [수정] 모드에 따른 분기 처리 및 키 매핑 적용
-    #@trace_logic
+    @trace_logic
     def key_down(self, key_name: str):
         if self.mode == "SOFTWARE":
             code = self._get_scan_code(key_name)
-            if code == 0:
-                # logger.debug(f"Unknown key: {key_name}") # 디버깅용
-                pass
+            if code == 0: pass
             self._send_key_software(code, True)
-        elif self.mode == "HARDWARE":
-            self._send_key_hardware(key_name, True)
+        elif self.mode == "HARDWARE" and self.arduino:
+            # [연결 지점] Bridge로 위임
+            self.arduino.send_key(key_name, True)
 
     @trace_logic
     def key_up(self, key_name: str):
         if self.mode == "SOFTWARE":
             code = self._get_scan_code(key_name)
             self._send_key_software(code, False)
-        elif self.mode == "HARDWARE":
-            self._send_key_hardware(key_name, False)
+        elif self.mode == "HARDWARE" and self.arduino:
+            # [연결 지점] Bridge로 위임
+            self.arduino.send_key(key_name, False)
 
     def press(self, key_name: str, duration: float = 0.05):
         """단발성 키 입력 (HumanInput 적용)"""
@@ -177,6 +179,29 @@ class ActionHandler:
         # [수정] 키를 뗀 후 다음 행동까지의 미세한 딜레이 (After-cast delay)
         # 0.02초 ~ 0.05초 사이의 Ex-Gaussian 딜레이
         HumanInput.human_sleep(0.03)
+
+    def mouse_move(self, x: int, y: int):
+        """
+        절대 좌표로 마우스 이동
+        SOFTWARE 모드: (필요하다면 win32api 구현 추가 필요)
+        HARDWARE 모드: ArduinoBridge 사용
+        """
+        if self.mode == "HARDWARE" and self.arduino:
+            # 화면 해상도는 config에서 가져오거나 상수로 지정 필요 (여기선 기본 1920x1080 가정)
+            self.arduino.send_mouse_move(x, y, 1920, 1080)
+        else:
+            # SOFTWARE 모드 마우스 이동 미구현 시 로그
+            logger.warning("Mouse move not implemented for SOFTWARE mode yet.")
+
+    # [추가] 마우스 클릭 기능 확장
+    def mouse_click(self, button: str = 'left'):
+        if self.mode == "HARDWARE" and self.arduino:
+            self.arduino.send_mouse_click(button, True)
+            HumanInput.human_sleep(0.05 + HumanInput.get_random_delay(0.01, 0.03)) # 클릭 지속시간 랜덤화
+            self.arduino.send_mouse_click(button, False)
+        else:
+             # SOFTWARE 모드 클릭 미구현 시 로그
+             pass
 
     # --- Physics & Feedback Control Logic (기존 유지) ---
 
