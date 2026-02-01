@@ -34,6 +34,14 @@ class VisionSystem:
         }
         self.window_found = False
         self.hwnd = None
+
+        # [신규 추가] 캡처보드 관련 변수
+        self.use_external_cam = getattr(config, 'USE_CAPTURE_CARD', False) # config에 없으면 False
+        self.cap = None
+
+        # 캡처 모드면 카메라 초기화 시도
+        if self.use_external_cam:
+            self._init_camera_device()
         
         self.minimap_roi = None
         self.kill_roi = None
@@ -54,6 +62,18 @@ class VisionSystem:
 
     def find_window(self):
         """메이플스토리 창 탐색 및 좌표 갱신"""
+
+        # [Hook] 캡처보드 모드일 경우 윈도우 탐색 로직을 건너뜀
+        if self.use_external_cam:
+            if self.cap and self.cap.isOpened():
+                self.window_found = True
+                return True
+            else:
+                # 연결이 끊겼다면 재연결 시도
+                logger.warning("⚠️ 캡처보드 신호 없음. 재연결 시도...")
+                self._init_camera_device()
+                return self.window_found
+            
         try:
             windows = gw.getWindowsWithTitle('MapleStory')
             if not windows:
@@ -101,6 +121,26 @@ class VisionSystem:
 
     def capture(self):
         """현재 화면을 캡처하여 OpenCV 포맷으로 반환"""
+
+            
+        # [Hook] 캡처보드 모드 처리
+        if self.use_external_cam:
+            if not self.cap or not self.cap.isOpened():
+                logger.error("캡처 장치가 준비되지 않았습니다.")
+                self.find_window() # 재연결 시도
+                return None
+            
+            ret, frame = self.cap.read()
+            if not ret:
+                logger.warning("프레임 수신 실패 (캡처보드)")
+                return None
+            
+            # 필요 시 해상도 리사이징 (봇이 예상하는 해상도와 다를 경우)
+            # if frame.shape[1] != config.DEFAULT_RES_W:
+            #     frame = cv2.resize(frame, (config.DEFAULT_RES_W, config.DEFAULT_RES_H))
+                
+            return frame
+        
         if not self.window_found or self.capture_area["width"] <= 0:
             if not self.find_window():
                 return None
@@ -216,7 +256,7 @@ class VisionSystem:
         # 호환성을 위해 GUI에서 사용하는 형태로 반환
         return frame, 0, 0, 0, 0
     
-    @trace_logic
+    
     def activate_window(self):
         """게임 창을 맨 앞으로 가져오고 포커스를 줍니다."""
         if not self.hwnd:
@@ -243,3 +283,34 @@ class VisionSystem:
         except Exception as e:
             logger.error(f"창 활성화 실패: {e}")
             return False
+        
+    def _init_camera_device(self):
+        """[신규] 캡처보드/웹캠 장치 초기화"""
+        try:
+            cam_idx = getattr(config, 'CAMERA_INDEX', 0)
+            logger.info(f"🎥 캡처보드 연결 시도 (Index: {cam_idx})...")
+            
+            # Windows에서는 cv2.CAP_DSHOW가 초기화 속도가 빠름
+            self.cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+            
+            if not self.cap.isOpened():
+                logger.error("❌ 캡처보드를 열 수 없습니다. 장치 연결을 확인하세요.")
+                self.window_found = False
+            else:
+                # 해상도 강제 설정 (선택 사항)
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.DEFAULT_RES_W)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.DEFAULT_RES_H)
+                
+                # 버퍼 비우기 (딜레이 방지)
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                
+                logger.info(f"✅ 캡처보드 연결 성공. 해상도 설정: {config.DEFAULT_RES_W}x{config.DEFAULT_RES_H}")
+                self.window_found = True # 카메라는 '창'이 아니지만, 로직 흐름상 Found로 처리
+
+    
+        except Exception as e:
+            logger.error(f"카메라 초기화 중 예외 발생: {e}")
+
+    def __del__(self):
+        if self.cap and self.cap.isOpened():
+            self.cap.release()

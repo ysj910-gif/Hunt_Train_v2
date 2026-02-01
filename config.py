@@ -1,7 +1,7 @@
 # config.py
 
 # [하드웨어 통신 설정]
-SERIAL_PORT = "COM8"
+SERIAL_PORT = "COM13"
 BAUD_RATE = 115200
 
 # [시스템 루프 및 성능 설정]
@@ -45,3 +45,9 @@ TIME_JUMP_DELAY = 0.5     # 점프 후 대기 시간
 TIME_UP_JUMP_WAIT = 0.8   # 윗점프 후 체공 대기 시간
 TIME_DOWN_JUMP_WAIT = 0.5 # 밑점프 후 대기 시간
 TIME_RECOVERY_WAIT = 1.0  # 비상 복구 대기 시간
+
+# [CAPTURE SETTINGS]
+USE_CAPTURE_CARD = True      # True: 캡처보드 사용, False: 기존 윈도우 캡처
+CAMERA_INDEX = 0             # 캡처보드 장치 번호 (OBS 가상카메라 or USB 캡처보드)
+CAMERA_WIDTH = 1920          # 입력 해상도 가로 (강제 리사이징용)
+CAMERA_HEIGHT = 1080         # 입력 해상도 세로
