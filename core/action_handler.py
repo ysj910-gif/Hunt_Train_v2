@@ -193,6 +193,21 @@ class ActionHandler:
             # SOFTWARE 모드 마우스 이동 미구현 시 로그
             logger.warning("Mouse move not implemented for SOFTWARE mode yet.")
 
+    def mouse_down(self, button: str = 'left'):
+        if self.mode == "HARDWARE" and self.arduino:
+            # ArduinoBridge에 send_mouse_click(pressed=True)가 있다고 가정
+            self.arduino.send_mouse_click(button, True)
+        else:
+            # SOFTWARE 모드 구현 (필요시 win32api 사용)
+            pass
+
+    # [추가] 수동 제어용: 마우스 버튼 뗌
+    def mouse_up(self, button: str = 'left'):
+        if self.mode == "HARDWARE" and self.arduino:
+            self.arduino.send_mouse_click(button, False)
+        else:
+            pass
+
     # [추가] 마우스 클릭 기능 확장
     def mouse_click(self, button: str = 'left'):
         if self.mode == "HARDWARE" and self.arduino:

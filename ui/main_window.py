@@ -15,6 +15,9 @@ from ui.components.roi_selector import ROISelector
 from ui.components.visualizer import Visualizer
 from ui.components.viewport_manager import ViewportManager
 from ui.components.simulation_mode import SimulationMode
+# [추가] 모듈 임포트
+from ui.manual_control import ManualControlWidget
+from utils.logger import logger
 
 
 class MainWindow:
@@ -47,6 +50,7 @@ class MainWindow:
 
         self.sim_mode = None
         self.is_simulating = False
+        self.control_window = None # 창 참조 저장용
         
         self.setup_ui()
         self.load_settings()
@@ -96,6 +100,13 @@ class MainWindow:
 
         self.canvas = tk.Canvas(self.canvas_frame, bg="black")
         self.canvas.pack(fill="both", expand=True)
+
+        # [추가] 제어하기 버튼 생성
+        self.btn_manual_control = ttk.Button(zoom_frame, text="🎮 원격 제어", command=self.open_manual_control)
+        self.btn_manual_control.pack(side="right", padx=5)
+        
+        # 버튼을 기존 레이아웃에 추가 (예: 상단 툴바나 사이드바)
+        # self.layout_toolbar.addWidget(self.btn_manual_control)
         
         # 2-2. 하단: 상태 및 로그 패널
         self.status_frame = ttk.Frame(self.left_split)
@@ -152,6 +163,21 @@ class MainWindow:
         
         self.lbl_bot_status = ttk.Label(self.frame_controls, text="[BOT: OFF]", foreground="red", justify="center")
         self.lbl_bot_status.pack()
+
+    def open_manual_control(self):
+        if not hasattr(self, 'agent') or not self.agent.action_handler:
+            logger.error("ActionHandler not ready.")
+            return
+
+        # 윈도우가 존재(exists)하는지 확인
+        if self.control_window is None or not self.control_window.winfo_exists():
+            logger.info("Opening Manual Control Window...")
+            # parent로 self.root를 전달 (Toplevel 생성 시 필요)
+            self.control_window = ManualControlWidget(self.root, self.agent.action_handler)
+        else:
+            # 이미 열려있으면 포커스
+            self.control_window.lift() 
+            self.control_window.focus_force()
 
     def update_ui_loop(self):
         """화면 갱신 루프"""
@@ -220,7 +246,7 @@ class MainWindow:
                     # target_h = int(h * self.view_scale)
                     
                     tk_img = Visualizer.convert_to_tk_image(cv_img, target_w=target_w, target_h=target_h)
-                        
+
                     if tk_img:
                         self.canvas.create_image(w//2, h//2, image=tk_img, anchor="center")
                         self.canvas.image = tk_img

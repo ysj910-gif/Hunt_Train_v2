@@ -137,3 +137,13 @@ class MapProcessor:
 
     def get_all_platforms_at_y(self, y_target: int, tolerance: int = 2):
         return [p for p in self.platforms if abs(p['y'] - y_target) <= tolerance]
+    
+    def unload_map(self):
+        """로드된 맵 데이터를 초기화합니다."""
+        self.platforms = []
+        self.spawns = []
+        self.portals = []
+        self.map_name = ""
+        self.offset_x = 0
+        self.offset_y = 0
+        logger.info("MapProcessor: Map data unloaded (Reset to empty).")
