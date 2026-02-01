@@ -179,7 +179,12 @@ class Visualizer:
         pos = debug_info.get("player_pos")
         if pos and minimap_roi:
             px, py = pos
-            screen_x, screen_y = mx + px, my + py
+            # 화면 좌표 (offset 적용)
+        # [수정] OpenCV 그리기 함수는 좌표로 반드시 int형을 요구하므로, 그리는 시점에만 형변환
+            screen_x = int(mx + px)
+            screen_y = int(my + py)
+            
+            # 플레이어 위치 표시 (초록 원)
             cv2.circle(vis_frame, (screen_x, screen_y), 6, (0, 255, 0), -1)
 
         # HUD Text

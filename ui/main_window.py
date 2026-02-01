@@ -23,7 +23,8 @@ class MainWindow:
         self.agent = agent
         
         self.root.title("MapleHunter v2.0 Modular UI")
-        self.root.geometry("1300x900") # 너비 약간 확장
+        # [수정] 게임 해상도(1366) + 우측 패널(약 400)을 고려하여 넉넉하게 설정
+        self.root.geometry("1800x950") # 너비 약간 확장
         
         self.job_mgr = JobManager()
         self.config_path = "config.json"
@@ -209,11 +210,17 @@ class MainWindow:
                 h = self.canvas.winfo_height()
                 
                 if w > 1 and h > 1:
-                    target_w = int(w * self.view_scale)
-                    target_h = int(h * self.view_scale)
+                    # [수정] 캔버스(창) 크기에 맞춰서 리사이징 (Letterbox 방식 적용됨)
+                    # 이렇게 해야 창 크기가 작아도 전체 화면이 잘리지 않고 축소되어 보입니다.
+                    target_w = w
+                    target_h = h
+                    
+                    # 만약 줌 기능을 쓰고 싶다면 아래 주석 해제 (기본값 1.0)
+                    # target_w = int(w * self.view_scale)
+                    # target_h = int(h * self.view_scale)
                     
                     tk_img = Visualizer.convert_to_tk_image(cv_img, target_w=target_w, target_h=target_h)
-                    
+                        
                     if tk_img:
                         self.canvas.create_image(w//2, h//2, image=tk_img, anchor="center")
                         self.canvas.image = tk_img
