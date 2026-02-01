@@ -43,8 +43,12 @@ class MapTab:
         map_frame.pack(fill="x", pady=5)
         self.lbl_map = ttk.Label(map_frame, text="No Map Loaded", foreground="gray")
         self.lbl_map.pack(pady=2)
+        btn_frame = ttk.Frame(map_frame)
+        btn_frame.pack(fill="x", padx=5, pady=5)
         ttk.Button(map_frame, text="📂 Load Map JSON", command=self.load_map_file).pack(fill="x", padx=5, pady=5)
-        
+               
+        ttk.Button(btn_frame, text="🗑️ Unload Map JSON", command=self.unload_map_file).pack(fill="x", pady=1)
+
         # 2. 오프셋 조정 (기존 코드 유지)
         offset_frame = ttk.LabelFrame(self.frame, text="Position Offset Correction")
         offset_frame.pack(fill="x", pady=5)
@@ -346,6 +350,36 @@ class MapTab:
                     self.save_callback(map_path=path)
             else:
                 messagebox.showerror("에러", "맵 로드 실패 (Agent Load Fail)")
+
+    def unload_map_file(self):
+        """[신규] 로드된 맵 데이터를 초기화(Unload)합니다."""
+        if not messagebox.askyesno("Unload Map", "현재 로드된 맵과 작업 중인 데이터를 모두 초기화하시겠습니까?\n(저장되지 않은 작업은 삭제됩니다.)"):
+            return
+
+        logger.info("[MapTab] Unloading map data requested.")
+
+        # 1. 봇 에이전트의 맵 데이터 초기화
+        # Agent에 unload_map 메서드가 있다고 가정하거나, map_processor에 직접 접근
+        if hasattr(self.agent, 'unload_map'):
+            self.agent.unload_map()
+            logger.info("[MapTab] Agent map data unloaded.")
+        elif hasattr(self.agent, 'map_processor'):
+            self.agent.map_processor.unload_map()
+            logger.info("[MapTab] Agent map_processor data unloaded directly.")
+        else:
+            logger.warning("[MapTab] Could not find method to unload Agent's map data.")
+
+        # 2. 편집 툴(MapCreator) 데이터 초기화
+        self.map_creator.clear_data()
+        
+        # 3. UI 초기화 (라벨, 리스트 등)
+        self.lbl_map.config(text="No Map Loaded", foreground="gray")
+        self._update_status_ui() # 상태 라벨 및 트리뷰 초기화
+        
+        # 오프셋 초기화
+        self.adjust_offset(0, 0, reset=True)
+        
+        messagebox.showinfo("Unloaded", "맵 데이터가 초기화되었습니다.")
 
     def adjust_offset(self, dx, dy, reset=False):
         # (기존 코드 유지)

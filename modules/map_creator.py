@@ -304,14 +304,18 @@ class MapCreator:
     
             
     def clear_data(self):
+        """모든 편집 데이터 초기화"""
         self.new_platforms = []
         self.new_portals = []
         self.new_ropes = []
         self.new_map_portals = []
-        self.new_spawns = []           # ← 추가
-        self.no_spawn_zones = []       # ← 추가
+        self.new_spawns = []
+        self.no_spawn_zones = []
         self.action_history = []
         self._reset_temp_pos()
+        
+        # [신규] 디버깅 로그 추가
+        logger.info("[MapCreator] All editor data cleared (Reset to blank state).")
 
     def load_from_json(self, file_path):
         """

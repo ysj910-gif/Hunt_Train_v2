@@ -136,22 +136,59 @@ class ManualControlWidget(tk.Toplevel):
         if not self.is_active: return
         key = self._get_key_name(event)
         if key: self.action_handler.key_down(key)
+        # [추가] "break"를 반환하여 Alt 키가 윈도우 메뉴를 호출하는 것(렉 유발)을 막습니다.
+        return "break"
 
     def on_key_release(self, event):
         if not self.is_active: return
         key = self._get_key_name(event)
         if key: self.action_handler.key_up(key)
+        return "break"
 
     def _get_key_name(self, event):
-        # Tkinter 키 이벤트를 ActionHandler 키 이름으로 변환
         keysym = event.keysym.lower()
         
-        # 특수 키 매핑
+        if keysym == "??" or not keysym:
+            return None
+
+        # [수정] F키, 특수키, 한영키 매핑 추가
         key_map = {
-            'return': 'enter', 'escape': 'esc', 'space': 'space',
+            # 1. 기본 제어키
+            'return': 'enter', 'escape': 'esc', 'space': 'space', 'tab': 'tab',
+            'backspace': '\x08', # arduino.py 호환
+            
+            # 2. 조합키
             'control_l': 'ctrl', 'control_r': 'ctrl',
             'shift_l': 'shift', 'shift_r': 'shift',
             'alt_l': 'alt', 'alt_r': 'alt',
-            'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right'
+            
+            # 3. 방향키 및 이동
+            'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right',
+            'home': 'home', 'end': 'end', 'prior': 'pageup', 'next': 'pagedown',
+            'insert': 'insert', 'delete': 'delete',
+
+            # 4. 기능키 (F1 ~ F12)
+            'f1': 'f1', 'f2': 'f2', 'f3': 'f3', 'f4': 'f4',
+            'f5': 'f5', 'f6': 'f6', 'f7': 'f7', 'f8': 'f8',
+            'f9': 'f9', 'f10': 'f10', 'f11': 'f11', 'f12': 'f12',
+
+            # 5. 특수키 및 한영전환 [요청사항]
+            'equal': '=',       # '=' 키
+            'minus': '-',       # '-' 키
+            'hangul': '\x85',   # 한영키 (arduino.py의 매핑값 0x85 적용)
+            
+            # (필요시 추가) 숫자패드 등
+            'kp_enter': 'enter', 'kp_0': '0', 'kp_1': '1', 
         }
-        return key_map.get(keysym, keysym)
+
+        # 1. 매핑된 키 우선 반환
+        if keysym in key_map:
+            return key_map[keysym]
+        
+        # 2. 매핑에 없는 일반 문자 (a, b, 1, [, ] 등)는 event.char 사용
+        #    keysym은 'bracketleft'처럼 길게 나오므로, 실제 문자('[' 등)가 있는 경우 그걸 사용
+        if event.char and len(event.char) == 1:
+            return event.char
+
+        # 3. 그 외는 keysym 그대로 반환
+        return keysym
