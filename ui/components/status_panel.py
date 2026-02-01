@@ -5,6 +5,7 @@ import datetime
 import os
 import json
 import re
+from core.latency_monitor import latency_monitor
 
 class StatusPanel:
     def __init__(self, parent):
@@ -30,6 +31,9 @@ class StatusPanel:
         
         self.lbl_pos = ttk.Label(self.dashboard_frame, text="Pos: (0,0)", font=("Consolas", 10))
         self.lbl_pos.pack(side="left", padx=5)
+
+        self.lbl_latency = ttk.Label(self.dashboard_frame, text="Lat: -ms", font=("Consolas", 10), foreground="purple")
+        self.lbl_latency.pack(side="left", padx=5)
 
         # 컨트롤 버튼 영역 (우측 정렬)
         self.ctrl_frame = ttk.Frame(self.dashboard_frame)
@@ -86,6 +90,10 @@ class StatusPanel:
         self.lbl_kill.config(text=f"Kill: {kill}")
         self.lbl_plat.config(text=f"Plat: #{p_idx}" if p_idx != -1 else "Plat: None")
         self.lbl_pos.config(text=f"Pos: {pos}")
+
+        # [NEW] Latency 정보 갱신
+        lat_str = latency_monitor.get_latency_info()
+        self.lbl_latency.config(text=f"Lat: {lat_str}")
 
     def log(self, message):
         """실시간 로그 추가"""

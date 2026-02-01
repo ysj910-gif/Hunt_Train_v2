@@ -7,6 +7,7 @@ import datetime
 import cv2
 import numpy as np
 from utils.logger import logger
+from core.latency_monitor import latency_monitor
 
 class DataRecorder:
     def __init__(self, map_processor=None, filename_prefix="Physics_Record"):
@@ -51,7 +52,7 @@ class DataRecorder:
                 "player_x", "player_y",
                 "vx", "vy", "ax", "ay",
                 "is_ground", "is_wall_left", "is_wall_right", "is_ladder", "air_time",
-                "entropy", "platform_id"
+                "entropy", "platform_id", "latency"  # <--- 추가됨
             ]
             self.writer.writerow(self.headers)
             logger.info(f"✅ 데이터 기록 시작: {self.filepath}")
@@ -147,6 +148,9 @@ class DataRecorder:
                 edges = cv2.Canny(small, 100, 200)
                 entropy = np.sum(edges) / 255.0
 
+            # [신규] 레이턴시 값 가져오기
+            current_latency = latency_monitor.current_latency
+
             # 4. CSV 기록
             row = [
                 f"{current_time:.4f}",
@@ -161,7 +165,8 @@ class DataRecorder:
                 is_ground, is_wall_left, is_wall_right, is_ladder,
                 f"{air_time:.3f}",                
                 f"{entropy:.2f}",
-                platform_id
+                platform_id,
+                f"{current_latency:.1f}"
             ]
             self.writer.writerow(row)
             

@@ -9,6 +9,8 @@ import pygetwindow as gw
 import time
 import config 
 from utils.logger import logger, trace_logic
+from core.latency_monitor import latency_monitor
+
 
 # DPI 인식 설정 (좌표 밀림 방지)
 try:
@@ -122,7 +124,6 @@ class VisionSystem:
     def capture(self):
         """현재 화면을 캡처하여 OpenCV 포맷으로 반환"""
 
-            
         # [Hook] 캡처보드 모드 처리
         if self.use_external_cam:
             if not self.cap or not self.cap.isOpened():
@@ -138,6 +139,10 @@ class VisionSystem:
             # 필요 시 해상도 리사이징 (봇이 예상하는 해상도와 다를 경우)
             # if frame.shape[1] != config.DEFAULT_RES_W:
             #     frame = cv2.resize(frame, (config.DEFAULT_RES_W, config.DEFAULT_RES_H))
+            
+            # [신규 추가] 레이턴시 측정: 프레임 획득 직후 변화 감지 요청
+            # (측정 중이 아니면 내부에서 즉시 리턴되므로 성능 영향 없음)
+            latency_monitor.check_visual_change(frame)
                 
             return frame
         
@@ -152,6 +157,10 @@ class VisionSystem:
                 img_buffer = sct.grab(self.capture_area)
                 img_np = np.array(img_buffer)
                 frame = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
+                
+                # [신규 추가] 레이턴시 측정: 프레임 획득 직후 변화 감지 요청
+                latency_monitor.check_visual_change(frame)
+
                 return frame
 
         except Exception as e:

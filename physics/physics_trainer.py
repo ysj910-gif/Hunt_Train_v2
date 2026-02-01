@@ -10,6 +10,8 @@ import json
 import traceback
 import logging
 import cv2  # [추가] OpenCV
+import config
+from core.latency_monitor import latency_monitor
 
 # 프로젝트 루트 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -234,6 +236,19 @@ class PhysicsTrainerVisualApp:
         
         self.btn_undo = ttk.Button(ctrl_frame, text="↩️ 최근 데이터 삭제", command=self._undo_last_data, state="disabled")
         self.btn_undo.pack(side="left", fill="x", expand=True, ipady=5, padx=2)
+
+        # [Modify] 우측 옵션 패널 (실시간 화면 + 캡처보드 설정)
+        right_panel = ttk.Frame(ctrl_frame)
+        right_panel.pack(side="right")
+
+        # 1. 캡처보드 모드 체크박스 (신규 기능)
+        # config.USE_CAPTURE_CARD 초기값 반영
+        initial_cam_mode = getattr(config, 'USE_CAPTURE_CARD', False)
+        self.use_capture_card_var = tk.BooleanVar(value=initial_cam_mode)
+        
+        ttk.Checkbutton(right_panel, text="🎥 캡처보드 모드", 
+                        variable=self.use_capture_card_var,
+                        command=self._toggle_capture_mode).pack(side="top", anchor="e", padx=5)
         
         # [추가] 실시간 화면 보기 체크박스
         self.show_vision_var = tk.BooleanVar(value=False)
@@ -247,6 +262,42 @@ class PhysicsTrainerVisualApp:
             # 필요하다면 ROI 재설정 알림을 줄 수도 있음
         else:
             messagebox.showerror("실패", "메이플스토리 창을 찾을 수 없습니다.\n게임을 실행했는지 확인해주세요.")
+
+    def _toggle_capture_mode(self):
+        use_cam = self.use_capture_card_var.get()
+        
+        # 1. Config 전역 설정 업데이트
+        config.USE_CAPTURE_CARD = use_cam
+        
+        # 2. 로그 출력
+        mode_str = "CAPTURE CARD" if use_cam else "WINDOW CAPTURE"
+        logger.info(f"🔄 비전 시스템 모드 전환 시도: {mode_str}")
+        
+        try:
+            # 3. 기존 Vision 객체 정리 (카메라 해제 등)
+            if hasattr(self, 'vision') and self.vision:
+                # VisionSystem에 __del__이나 release가 있다면 호출됨
+                del self.vision
+            
+            # 4. VisionSystem 재초기화 (변경된 Config가 반영됨)
+            self.vision = VisionSystem()
+            
+            # 5. 스캐너에도 새로운 레퍼런스 연결이 필요하다면 수행 (현재 구조상 불필요할 수 있으나 확인)
+            # self.scanner는 상태를 가지므로 유지하되, Vision과의 의존성이 있다면 갱신
+            
+            # 6. UI 피드백
+            if self.vision.window_found or (use_cam and self.vision.cap is not None):
+                msg = f"✅ 모드 전환 성공: {mode_str}"
+                logger.info(msg)
+                messagebox.showinfo("성공", msg)
+            else:
+                msg = f"⚠️ 모드 전환 후 연결 실패: {mode_str}\n장치 연결이나 게임 실행을 확인하세요."
+                logger.warning(msg)
+                messagebox.showwarning("경고", msg)
+                
+        except Exception as e:
+            logger.error(f"❌ 모드 전환 중 오류: {e}")
+            traceback.print_exc()
 
     # [추가] 미니맵 ROI 설정 메서드
     def _set_minimap_roi(self):
@@ -421,6 +472,9 @@ class PhysicsTrainerVisualApp:
     def _training_routine(self):
         try:
             print(">>> [INIT] Modules assembly...")
+            
+            # [Check] self.vision은 _toggle_capture_mode에 의해 최신 상태임
+            logger.info(f"Setting up Agent with Vision Mode: {'Capture Card' if config.USE_CAPTURE_CARD else 'Window Capture'}")
             
             # [수정] 이미 생성된 self.vision, self.scanner 사용
             action_handler = ActionHandler() 
@@ -635,50 +689,75 @@ class PhysicsTrainerVisualApp:
             self._update_gui(f"오류 발생: {e}")
 
     def _visualizer_loop(self):
-        if not self.is_running: return
+        if not self.is_running and not self.show_vision_var.get():
+            # 실행 중도 아니고 화면 보기도 꺼져있으면 갱신 주기 늦춤
+            self.root.after(500, self._visualizer_loop)
+            return
+
         try:
-            # 여기서는 float 좌표를 그대로 받아옴
+            # 1. 위치 데이터 획득 시도 및 로깅
             pos = self._get_player_pos()
-            
-            # [수정 1] 캔버스 업데이트 시 int 변환 불필요 (Tkinter는 float도 처리 가능하지만 안전하게 int 권장)
             if pos:
                 self.canvas.update_player(pos[0], pos[1])
-        except Exception: pass
+            else:
+                pass
+        except Exception: 
+            pass
 
+        # 2. 화면 캡처 및 시각화
         if self.show_vision_var.get():
             try:
+                # 윈도우/카메라 연결 확인
                 if not self.vision.window_found:
+                    # logger.debug("🔎 시각화 루프: 윈도우/카메라 찾는 중...")
                     self.vision.find_window()
                 
+                # 프레임 캡처
                 frame = self.vision.capture()
+                
                 if frame is not None:
+                    # 미니맵 ROI 시각화
                     if self.vision.minimap_roi:
                         self.scanner.set_rois(self.vision.minimap_roi, self.vision.kill_roi)
                     
+                    # 플레이어 탐색 로직 수행
                     cx, cy = self.scanner.find_player(frame)
                     
-                    # 그리기 (OpenCV)
+                    # [Add] 인식 결과 오버레이
                     if self.vision.minimap_roi:
                         mx, my, mw, mh = self.vision.minimap_roi
                         cv2.rectangle(frame, (mx, my), (mx+mw, my+mh), (0, 255, 0), 2)
                         
                         if cx > 0 and cy > 0:
-                            # [수정 2] 화면에 그릴 때만 int()로 변환하여 소수점 버림
-                            # (데이터 기록이나 물리 엔진에는 소수점 그대로 전달됨)
                             screen_x = int(mx + cx)
                             screen_y = int(my + cy)
                             
+                            # 추적 점 및 좌표 텍스트
                             cv2.circle(frame, (screen_x, screen_y), 5, (0, 0, 255), -1)
-                            # 텍스트에는 소수점 둘째 자리까지 표시
-                            cv2.putText(frame, f"Pos: {cx:.2f},{cy:.2f}", (screen_x+10, screen_y), 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                            cv2.putText(frame, f"P({cx:.1f}, {cy:.1f})", (screen_x+10, screen_y), 
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                        else:
+                            # [Add] 인식 실패 표시
+                            cv2.putText(frame, "SEARCHING...", (mx, my-5), 
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
+                    # ==========================================================
+                    # [NEW] 레이턴시 정보 표시 (좌측 상단 보라색 텍스트)
+                    # ==========================================================
+                    lat = latency_monitor.current_latency
+                    cv2.putText(frame, f"Latency: {lat:.1f} ms", (10, 30), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
+
+                    # 디버그 창 출력
                     cv2.imshow("Bot Vision Debug", frame)
                     cv2.waitKey(1)
+                else:
+                    logger.warning("⚠️ 프레임 캡처 실패 (Frame is None)")
+
             except Exception as e:
-                print(f"Vision Error: {e}")
+                logger.error(f"❌ Vision Loop Error: {e}")
+                traceback.print_exc()
         else:
-            # 체크박스 끄면 창 닫기
             try:
                 if cv2.getWindowProperty("Bot Vision Debug", 0) >= 0:
                     cv2.destroyWindow("Bot Vision Debug")

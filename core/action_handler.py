@@ -12,6 +12,8 @@ from utils.physics_utils import PhysicsUtils, MovementTracker
 from utils.logger import logger, trace_logic
 from utils.human_input import HumanInput
 from core.arduino_bridge import ArduinoBridge
+from core.latency_monitor import latency_monitor 
+
 
 # --- Low Level Input Definition (Windows API) ---
 SendInput = ctypes.windll.user32.SendInput
@@ -180,17 +182,19 @@ class ActionHandler:
         # 0.02초 ~ 0.05초 사이의 Ex-Gaussian 딜레이
         HumanInput.human_sleep(0.03)
 
+
     def mouse_move(self, x: int, y: int):
         """
         절대 좌표로 마우스 이동
-        SOFTWARE 모드: (필요하다면 win32api 구현 추가 필요)
-        HARDWARE 모드: ArduinoBridge 사용
         """
+        # [HOOK] 레이턴시 측정 시작 트리거
+        # 실제 하드웨어 전송 직전에 타임스탬프를 찍습니다.
+        if self.mode == "HARDWARE" and latency_monitor.should_measure():
+             latency_monitor.start_measurement()
+
         if self.mode == "HARDWARE" and self.arduino:
-            # 화면 해상도는 config에서 가져오거나 상수로 지정 필요 (여기선 기본 1920x1080 가정)
             self.arduino.send_mouse_move(x, y, 1920, 1080)
         else:
-            # SOFTWARE 모드 마우스 이동 미구현 시 로그
             logger.warning("Mouse move not implemented for SOFTWARE mode yet.")
 
     def mouse_down(self, button: str = 'left'):
