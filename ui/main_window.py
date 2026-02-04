@@ -173,7 +173,7 @@ class MainWindow:
         if self.control_window is None or not self.control_window.winfo_exists():
             logger.info("Opening Manual Control Window...")
             # parent로 self.root를 전달 (Toplevel 생성 시 필요)
-            self.control_window = ManualControlWidget(self.root, self.agent.action_handler)
+            self.control_window = ManualControlWidget(self.root, self.agent)
         else:
             # 이미 열려있으면 포커스
             self.control_window.lift() 

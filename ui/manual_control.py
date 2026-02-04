@@ -11,9 +11,10 @@ class ManualControlWidget(tk.Toplevel):
     Tkinter 기반의 수동 제어 윈도우
     ActionHandler를 통해 입력을 PC A(Target)로 전달합니다.
     """
-    def __init__(self, parent, action_handler):
+    def __init__(self, parent, agent):           # [!] agent 객체 전체를 받음
         super().__init__(parent)
-        self.action_handler = action_handler
+        self.agent = agent                       # [!] agent 저장
+        self.action_handler = agent.action_handler
         
         # 윈도우 설정
         self.title('Manual Control Mode')
@@ -27,9 +28,9 @@ class ManualControlWidget(tk.Toplevel):
         self._init_ui()
         
         # 카메라 설정 (VideoThread 대신 after 메서드 사용)
-        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        # self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         
         # 키보드 포커스 설정
         self.bind("<KeyPress>", self.on_key_press)
@@ -76,8 +77,12 @@ class ManualControlWidget(tk.Toplevel):
     def update_video(self):
         if not self.running: return
 
-        ret, frame = self.cap.read()
-        if ret:
+        frame = self.agent.current_frame
+
+        if frame is None and hasattr(self.agent, 'vision'):
+            frame = self.agent.vision.capture()
+
+        if frame is not None:
             img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img_pil = Image.fromarray(img)
             
@@ -97,11 +102,6 @@ class ManualControlWidget(tk.Toplevel):
 
     def on_close(self):
         self.running = False
-        # [수정] 메인 프로그램과 자원 공유 충돌 방지
-        # 캡처보드 특성상 여기서 release()를 호출하면 메인 루프의 연결도 끊어질 수 있으므로,
-        # 명시적 해제 없이 윈도우만 파괴합니다. (필요 시 Python GC나 OS가 정리)
-        # if self.cap.isOpened():
-        #    self.cap.release()
         self.destroy()
 
     # --- 입력 처리 로직 ---
